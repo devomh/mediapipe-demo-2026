@@ -85,3 +85,8 @@ max_size = 0.12           # ...growing to this while the pinch is held
 inflate_s = 1.5
 throw_gain = 1.0          # release velocity multiplier
 background_brightness = 0.25
+choose_frames = 5         # the other hand's finger count must hold this long to choose a shape
+choose_min_pinch_ratio = 0.73  # ignore a hand closing in on a pinch (deliberate counts >= 0.77,
+                               # a hand on its way into a pinch <= 0.70, measured on fixtures)
+stretch_max_size = 0.3    # two-hand stretch: largest radius, in window heights
+stretch_gain = 0.5        # radius = this x half the pinch distance (hands are ~0.7-1.3 apart)

@@ -258,6 +258,8 @@ class App:
                 self.scene.draw(self.surface)
                 self.overlay.draw(self.surface, self.viewport)
                 status = "replay finished" if self.source.finished else ""
+                if getattr(self.source, "restarts", 0):
+                    status = f"recognizer restarts {self.source.restarts}"
                 rec_s = None if self.recorder is None else time.monotonic() - self._rec_started
                 self.hud.draw(
                     self.surface, self.opts.source_label, self.hands_tracked, rec_s, status

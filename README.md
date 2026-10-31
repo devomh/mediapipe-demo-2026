@@ -34,7 +34,9 @@ enable the terminal app, then restart it. **Linux:** your user needs to be in th
 
 ```sh
 uv run ai-playground                          # live camera, Vision scene
-uv run ai-playground --scene geometry         # Magic Geometry: pinch, hold, release / throw
+uv run ai-playground --scene geometry         # Magic Geometry: pinch, hold, release / throw;
+                                              # other hand: 1-5 fingers picks the shape;
+                                              # pinch with both hands to stretch one shape
 uv run ai-playground --list-cameras           # which camera indices work
 uv run ai-playground --camera 1 --fullscreen --display 1
 uv run ai-playground --config venue.toml      # venue overrides, deep-merged over config/default.toml
