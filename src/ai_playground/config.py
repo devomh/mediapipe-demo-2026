@@ -106,7 +106,31 @@ class DisplayConfig:
 @dataclass(frozen=True, slots=True)
 class HudConfig:
     visible: bool
+    keys_visible: bool
     latency_window_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class PhysicsConfig:
+    gravity_factor: float
+    steps_per_second: int
+    max_substeps: int
+    elasticity: float
+    friction: float
+    max_bodies: int
+    fade_s: float
+    sleep_time_s: float
+    max_speed: float
+    max_rise: float
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryConfig:
+    min_size: float
+    max_size: float
+    inflate_s: float
+    throw_gain: float
+    background_brightness: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +141,8 @@ class Config:
     gestures: GesturesConfig
     display: DisplayConfig
     hud: HudConfig
+    physics: PhysicsConfig
+    geometry: GeometryConfig
 
     def model_path(self) -> Path:
         p = Path(self.recognizer.model_path)

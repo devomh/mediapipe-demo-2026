@@ -40,6 +40,9 @@ Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
 - `pymunk.Space` in screen pixels, y down. **Gravity = `1.6 × window_height` px/s²**, so behavior
   doesn't depend on resolution.
 - Static floor and left/right walls (segments). The ceiling is open, so thrown shapes come back down.
+  *Added in A.1:* throws are capped at `max_speed` (4 window heights/s) and may rise at most
+  `max_rise` (1 window height) above the release point. Uncapped, a hard upward flick flew ~7
+  window heights up, stayed off screen for ~6 s, and with any sideways motion sailed over a wall.
 - Fixed timestep 1/120 s using an accumulator, with at most 4 substeps per frame (no spiral of death).
 - Materials: elasticity 0.6, friction 0.6. Density varies slightly by type, so bars feel heavier
   than circles. Sleeping is enabled.

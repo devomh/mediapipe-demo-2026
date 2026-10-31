@@ -1,6 +1,10 @@
 version = 1
 revision = 3
 requires-python = "==3.12.*"
+resolution-markers = [
+    "sys_platform != 'emscripten'",
+    "sys_platform == 'emscripten'",
+]
 
 [[package]]
 name = "absl-py"
@@ -18,6 +22,7 @@ source = { editable = "." }
 dependencies = [
     { name = "mediapipe" },
     { name = "pygame-ce" },
+    { name = "pymunk" },
 ]
 
 [package.dev-dependencies]
@@ -30,6 +35,7 @@ dev = [
 requires-dist = [
     { name = "mediapipe", specifier = "==1.2.0" },
     { name = "pygame-ce", specifier = ">=2.5" },
+    { name = "pymunk", specifier = ">=7.3.1" },
 ]
 
 [package.metadata.requires-dev]
@@ -327,6 +333,30 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
+]
+
+[[package]]
+name = "pymunk"
+version = "7.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/47/6e510f1e6809efdf6f0cc55f4f0cf13a8a4d0b3c093198a10ef6dbecf554/pymunk-7.3.1.tar.gz", hash = "sha256:d36f10ac78355b5f4798d5b17e32100a1a1230258b1f37008f778ece72ddb719", size = 3580833, upload-time = "2026-10-11T13:18:41.155Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/ab/4bcdab62648ba90e7fa40acef4e090ba9472e286c5aa074750222b9921fa/pymunk-7.3.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:7b53c0e101e1447bc1eeae8f3e0e337033b4d03f427ebf3875c3772de2e23788", size = 370709, upload-time = "2026-10-11T13:16:11.729Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/48/fe88a184981f6962dc3f4720b13c3848afdc4cd6185224e0e2e89c06ddab/pymunk-7.3.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:089666d9458e7e72ead3aaac13471e5aafba0306d367db86d010fc59d45cdf1e", size = 352965, upload-time = "2026-10-11T13:16:13.416Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/84/e6347e293a07ed320c06e35e5bf1a61ada983410e277f0ca05dd3b4f88f1/pymunk-7.3.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d6a02f4e35a56bd8b775e8f81d05406e7eef11d080c66e38cfc10fc639d1a302", size = 987766, upload-time = "2026-10-11T13:16:15.875Z" },
+    { url = "https://files.pythonhosted.org/packages/94/22/01c4e173ff2542dc0295885eca48b5e6e22fbd7cc9c1aa90fb4a3f6d87f2/pymunk-7.3.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9a5dc4da92744bff1a0f0e4cfd524956fc232402a54b98e53ee69d2b5c667b61", size = 1016108, upload-time = "2026-10-11T13:16:18.44Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/b0/255620114feb0d53f625270ded3ecec50f49ef60a860425ab048322aeade/pymunk-7.3.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:a9ffc017cfcf08d4b2e726b336d98dc39c320d66bc447683069b84fa7cdffa11", size = 985071, upload-time = "2026-10-11T13:16:21.069Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/af/f8da18aa1261e3fffc9cc2987d061e7fb4d5c715ee8cb998007369e11846/pymunk-7.3.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:be3a0813f9f884bf13264bc09d4490869eb5ebb1a4da12a9d73879c1dab0af62", size = 1014665, upload-time = "2026-10-11T13:16:24.12Z" },
+    { url = "https://files.pythonhosted.org/packages/90/8a/e27176469bad913742049a08862baf03db193b245859dddab4c1ddedfff9/pymunk-7.3.1-cp312-cp312-win32.whl", hash = "sha256:b474a6eaa7b1d66a437f8b3ec38c954d11309fff7f6e19b10a56dd2dcd55813a", size = 319088, upload-time = "2026-10-11T13:16:26.14Z" },
+    { url = "https://files.pythonhosted.org/packages/50/ef/3e982a5328fe25ac3efe71b8bf034741188a3504b3e3264c7a4a03d8d02b/pymunk-7.3.1-cp312-cp312-win_amd64.whl", hash = "sha256:bf14fecba36ac43aaf413c4d06a58797c198622c089eeead0bd1ac491b644d63", size = 371788, upload-time = "2026-10-11T13:16:27.937Z" },
+    { url = "https://files.pythonhosted.org/packages/24/c7/234446635ef2258d483168382573dd039a30b327a541389e8a16117b8c83/pymunk-7.3.1-pp312-pypy312_pp80-macosx_10_15_x86_64.whl", hash = "sha256:b3955eb1cef2ed845e893795ec53899d26a8ce1a2ed290c987a97b0e93c7a048", size = 295521, upload-time = "2026-10-11T13:18:28.34Z" },
+    { url = "https://files.pythonhosted.org/packages/69/54/fc8dfc755179388adbe0f292b8911cb64c0ed8b65ba613293ba4292ce7cd/pymunk-7.3.1-pp312-pypy312_pp80-macosx_11_0_arm64.whl", hash = "sha256:d87876e8cbe92ae4b4626f91e81a516b0d42cc6331c395b828c117cb89f1cafe", size = 287564, upload-time = "2026-10-11T13:18:30.414Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/48/3d01554d115d8c3f1063847cfe786e58df4db0f7410058c9b2ad73433169/pymunk-7.3.1-pp312-pypy312_pp80-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e4f171df0222027b28361b42f304e617b1b457033ef660471fc520c03d55203f", size = 320643, upload-time = "2026-10-11T13:18:32.087Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/79/76252ca30e5f3b4ff41b077c93b566bd396c2e7c3b91c3b806f1272dc203/pymunk-7.3.1-pp312-pypy312_pp80-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b732a7242362d91ae043281563243978f216cd58be42541a25d1262d7ac3e304", size = 325938, upload-time = "2026-10-11T13:18:33.817Z" },
+    { url = "https://files.pythonhosted.org/packages/46/21/46322fbddb98fa319ea1d349a39cd4f2e403cca0e960d302351c345a164a/pymunk-7.3.1-pp312-pypy312_pp80-win_amd64.whl", hash = "sha256:cc07807b4b4cda1cf06e0c6a4356a82cf7906415142c071ddcb237516f33d11d", size = 371859, upload-time = "2026-10-11T13:18:35.621Z" },
 ]
 
 [[package]]

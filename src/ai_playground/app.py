@@ -16,9 +16,11 @@ from ai_playground.gestures.engine import GestureEngine
 from ai_playground.render import text
 from ai_playground.render.background import Background
 from ai_playground.render.hud import Hud, Stats
+from ai_playground.render.keys import Hotkey, KeysOverlay
 from ai_playground.render.overlay import VisionOverlay
 from ai_playground.render.viewport import Viewport
 from ai_playground.scenes.base import AppContext, Scene
+from ai_playground.scenes.geometry import GeometryScene
 from ai_playground.scenes.vision import VisionScene
 from ai_playground.sources.recorder import Recorder, default_path
 from ai_playground.sources.slot import LatestSlot
@@ -27,7 +29,9 @@ from ai_playground.types import HandFrame
 
 log = logging.getLogger(__name__)
 
-SCENES: dict[str, Callable[[], Scene]] = {"vision": VisionScene}
+SCENES: dict[str, Callable[[], Scene]] = {"vision": VisionScene, "geometry": GeometryScene}
+# Operator scene keys. `1` is Vision until the Attract scene exists (A.8).
+SCENE_KEYS = {pygame.K_1: "vision", pygame.K_2: "geometry"}
 
 
 class Source(Protocol):
@@ -71,6 +75,8 @@ class App:
         self.overlay = VisionOverlay(cfg.gestures.pinch)
         self.stats = Stats(cfg.hud.latency_window_s)
         self.hud = Hud(self.stats, cfg.hud.visible)
+        self.keys_overlay = KeysOverlay(cfg.hud.keys_visible)
+        self.hotkeys = self._hotkeys()
         self.clock = pygame.time.Clock()
         self.recorder: Recorder | None = None
         self._rec_started = 0.0
@@ -102,6 +108,7 @@ class App:
             self.scene.exit()
         self.scene = SCENES[name]()
         self.scene.enter(self.ctx)
+        self.overlay.visible = getattr(self.scene, "show_vision", True)
 
     # --- recording ----------------------------------------------------------------------
     def start_recording(self, path: Path | None = None) -> None:
@@ -117,26 +124,98 @@ class App:
             self.recorder = None
 
     # --- input --------------------------------------------------------------------------
-    def _on_key(self, key: int) -> None:
-        if key == pygame.K_ESCAPE:
-            self.running = False
-        elif key == pygame.K_v:
-            self.overlay.visible = not self.overlay.visible
-        elif key == pygame.K_h:
-            self.hud.visible = not self.hud.visible
-        elif key == pygame.K_b:
-            self.background.cycle()
-        elif key == pygame.K_l:
-            self.overlay.show_indices = not self.overlay.show_indices
-        elif key == pygame.K_r:
+    def _hotkeys(self) -> list[Hotkey]:
+        """Every operator key, in display order. The keys overlay is generated from this list."""
+
+        def onoff(flag: bool) -> str:
+            return "on" if flag else "off"
+
+        def toggle(obj, attr: str):
+            return lambda _key: setattr(obj, attr, not getattr(obj, attr))
+
+        def recording(_key: int) -> None:
             if self.recorder is None:
                 self.start_recording()
             else:
                 self.stop_recording()
-        elif key == pygame.K_SPACE and self.recorder is not None:
-            self.recorder.mark()
-        elif key == pygame.K_f:
-            self.toggle_fullscreen()
+
+        scene_keys = tuple(SCENE_KEYS)
+        scene_label = " / ".join(pygame.key.name(k).upper() for k in scene_keys)
+        scene_desc = "Scene: " + " / ".join(n.capitalize() for n in SCENE_KEYS.values())
+        return [
+            Hotkey((pygame.K_k,), "K", "Keys (this list)", toggle(self.keys_overlay, "visible")),
+            Hotkey(
+                scene_keys,
+                scene_label,
+                scene_desc,
+                lambda key: self.switch_scene(SCENE_KEYS[key]),
+                state=lambda: self.scene.name if self.scene else "-",
+            ),
+            Hotkey(
+                (pygame.K_v,),
+                "V",
+                "Vision overlay",
+                toggle(self.overlay, "visible"),
+                state=lambda: onoff(self.overlay.visible),
+            ),
+            Hotkey(
+                (pygame.K_l,),
+                "L",
+                "Landmark numbers",
+                toggle(self.overlay, "show_indices"),
+                state=lambda: onoff(self.overlay.show_indices),
+                available=lambda: self.overlay.visible,
+            ),
+            Hotkey(
+                (pygame.K_h,),
+                "H",
+                "HUD",
+                toggle(self.hud, "visible"),
+                state=lambda: onoff(self.hud.visible),
+            ),
+            Hotkey(
+                (pygame.K_b,),
+                "B",
+                "Background",
+                lambda _k: self.background.cycle(),
+                state=lambda: self.background.mode,
+            ),
+            Hotkey(
+                (pygame.K_c,),
+                "C",
+                "Clear shapes",
+                lambda _k: self.scene.clear(),
+                available=lambda: hasattr(self.scene, "clear"),
+            ),
+            Hotkey(
+                (pygame.K_r,),
+                "R",
+                "Record landmarks",
+                recording,
+                state=lambda: onoff(self.recorder is not None),
+            ),
+            Hotkey(
+                (pygame.K_SPACE,),
+                "Space",
+                "Mark (while recording)",
+                lambda _k: self.recorder.mark(),
+                available=lambda: self.recorder is not None,
+            ),
+            Hotkey(
+                (pygame.K_f,),
+                "F",
+                "Fullscreen",
+                lambda _k: self.toggle_fullscreen(),
+                state=lambda: onoff(self.fullscreen),
+            ),
+            Hotkey((pygame.K_ESCAPE,), "Esc", "Quit", lambda _k: setattr(self, "running", False)),
+        ]
+
+    def _on_key(self, key: int) -> None:
+        for hk in self.hotkeys:
+            if key in hk.keys and hk.is_available():
+                hk.action(key)
+                return
 
     # --- main loop ----------------------------------------------------------------------
     def run(self) -> int:
@@ -183,6 +262,7 @@ class App:
                 self.hud.draw(
                     self.surface, self.opts.source_label, self.hands_tracked, rec_s, status
                 )
+                self.keys_overlay.draw(self.surface, self.hotkeys)
                 pygame.display.flip()
 
                 self.stats.render_fps = self.clock.get_fps()
