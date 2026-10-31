@@ -52,8 +52,11 @@ Milestone 0.1 can be done on any machine. From 0.2 on, development happens on th
 - Worker loop: `read()` → `t_capture = monotonic()` → `cv2.flip(frame, 1)` → BGR→RGB →
   `recognize_for_video(mp.Image(...), timestamp_ms)` → build `HandFrame` → `slot.put(frame)`.
   The timestamp must be strictly increasing, so derive it from `t_capture`.
-- **Mirroring:** flipping before inference means MediaPipe's handedness matches the visitor's own
-  left/right. Milestone 0.2 must verify this on screen ("raise your right hand").
+- **Mirroring:** we flip before inference so the screen behaves like a mirror. MediaPipe's docs
+  suggest its handedness then matches the visitor's own left/right, but the milestone 0.2 check
+  on screen ("raise your right hand") showed the opposite: right hand, mirror view, labelled
+  "Left". `recognizer.py` therefore swaps the label, and `Hand.handedness` is always the
+  visitor's own hand.
 - `recognizer.py` is the only file that imports `mediapipe`. It converts results into `Hand`
   objects (NumPy arrays), so nothing downstream sees MediaPipe types.
 - Stop cleanly: worker checks a stop `Event`, releases the camera, closes the recognizer.
@@ -97,8 +100,12 @@ Milestone 0.1 can be done on any machine. From 0.2 on, development happens on th
    MediaPipe sometimes swaps labels for a frame or two.
 5. **Smoothing:** each track has a vectorized **One Euro filter** over its (21, 3) image landmarks
    and its (21, 3) world landmarks, timed by `t_capture`. Defaults: `min_cutoff=1.0`,
-   `beta=0.02`, `d_cutoff=1.0`. These are config values, tuned in milestone 0.4 against the
-   jitter and lag seen in fixtures.
+   `d_cutoff=1.0`, and `beta=10` (image) / `beta=40` (world), set separately because the units
+   differ (normalized units/s vs metres/s). These are config values, tuned in milestone 0.4
+   against the jitter and lag seen in fixtures.
+   *Changed during implementation:* the original `beta=0.02` is a value for pixel units. On our
+   units it delayed `pinch_start` by 9 frames (~300 ms) on a synthetic fast pinch, which fails the
+   ≤ 2-frame exit criterion; the new defaults give 1 frame (`tests/test_engine.py`).
 
 ## 7. Features (`gestures/features.py`, portable core)
 
@@ -110,7 +117,7 @@ landmarks**, so they don't depend on how far the hand is from the camera.
 | `palm_length` | ‖w[0] − w[9]‖ (wrist → middle MCP) |
 | `pinch_ratio(finger)` | ‖w[4] − w[tip(finger)]‖ / palm_length. Pinched ≈ 0.1–0.2, open ≈ 0.8–1.2 |
 | `pinch_point` | midpoint of image landmarks 4 and 8 (normalized screen coordinates) |
-| `finger_extended[5]` | non-thumb fingers: joint angle at PIP > 160°; thumb: angle at IP > 150° **and** tip far from index MCP. Thresholds in config |
+| `finger_extended[5]` | non-thumb fingers: ‖tip − wrist‖ / ‖PIP − wrist‖ > 1.2; thumb: ‖tip − pinky MCP‖ / palm_length > 0.85. Thresholds in config. *(Changed from joint angles: on real world landmarks curled fingers measured up to 152° at the PIP and extended ones as low as 161°, and thumb IP angles overlapped the same way (143° open vs 146° folded). The distance rules separate them on the sample images and a live recording: fingers: extended median 1.38 but down to ~1.1 while a hand enters the frame, curled ≤ 1.17 (fist seen edge-on), so the bands touch and fixtures should tune this; thumb ≥ 0.88 vs ≤ 0.79; `tests/test_recognizer.py`.)* |
 | `finger_count` | number of extended fingers |
 | `palm_center` | mean of image landmarks 0, 5, 9, 13, 17 |
 | `palm_roll` | angle of image vector 5 → 17 (radians), used for the AirSynth filter |

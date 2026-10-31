@@ -1,0 +1,64 @@
+# AI Playground defaults. Override per venue with `--config venue.toml`; only the keys you set
+# are replaced (deep merge). Unknown keys are an error.
+
+[camera]
+index = 0
+width = 640
+height = 480
+fps = 30
+mjpg_on_linux = true      # many webcams only reach 30 FPS uncompressed at low resolutions
+open_timeout_s = 3.0      # no frames within this time -> full-screen error
+
+[recognizer]
+model_path = "assets/models/gesture_recognizer.task"
+num_hands = 2
+min_hand_detection_confidence = 0.5
+min_hand_presence_confidence = 0.5
+min_tracking_confidence = 0.5
+
+[tracking]
+min_hand_size = 0.08      # wrist->middle-MCP / image height; smaller hands are bystanders
+match_gate = 0.25         # max wrist distance (normalized) to match a detection to a track
+grace_frames = 4          # frames a track survives without a detection
+handedness_window = 15    # majority vote over this many frames
+
+# One Euro filter. Units differ per landmark set, so beta does too: image landmarks move in
+# normalized units/s (~1 for a fast sweep), world landmarks in metres/s (~0.3 for a fast pinch).
+[tracking.one_euro.image]
+min_cutoff = 1.0
+beta = 10.0
+d_cutoff = 1.0
+
+[tracking.one_euro.world]
+min_cutoff = 1.0
+beta = 40.0
+d_cutoff = 1.0
+
+[gestures.pinch]
+enter = 0.25              # pinch_ratio below this starts a pinch...
+exit = 0.40               # ...and above this ends it (hysteresis)
+min_frames = 2            # consecutive frames needed to change state
+block_on_fist = true      # no pinch_start while MediaPipe sees Closed_Fist this frame
+
+[gestures.builtin]
+min_score = 0.6
+start_frames = 3
+end_frames = 3
+
+[gestures.fingers]
+tip_pip_ratio = 1.2         # non-thumb finger extended: tip->wrist / PIP->wrist above this
+thumb_tip_pinky_dist = 0.85 # thumb extended: tip->pinky MCP above this, in palm lengths
+
+[gestures.velocity]
+window_s = 0.1
+
+[display]
+width = 1280
+height = 720
+fullscreen = false
+display_index = 0
+target_fps = 60
+
+[hud]
+visible = true
+latency_window_s = 2.0

@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+
+# Fetched by scripts/fetch_models.py (pinned URL + SHA-256)
+assets/models/*
+!assets/models/.gitkeep
+*.part
+
+# Ad-hoc recordings (R hotkey). Curated fixtures live in tests/fixtures/.
+recordings/
+
+.DS_Store
