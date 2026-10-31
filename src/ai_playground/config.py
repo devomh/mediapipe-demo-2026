@@ -146,6 +146,18 @@ class GeometryConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class EffectsConfig:
+    enabled: bool
+    particle_cap: int
+    glow_scale: float
+    glow_intensity: float
+    impact_min_dv: float
+    impact_max_particles: int
+    burst_particles: int
+    release_particles: int
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     camera: CameraConfig
     recognizer: RecognizerConfig
@@ -155,6 +167,7 @@ class Config:
     hud: HudConfig
     physics: PhysicsConfig
     geometry: GeometryConfig
+    effects: EffectsConfig
 
     def model_path(self) -> Path:
         p = Path(self.recognizer.model_path)

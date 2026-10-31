@@ -103,3 +103,14 @@ paddle_hold_s = 0.4       # hold an open palm this long before it becomes a padd
 clear_hold_s = 1.5        # hold both fists this long to clear all shapes
 throw_lookback_s = 0.15   # opening a fist throws with the fastest velocity from this window:
                           # fist_end lands 70-130 ms after the fingers open (fist_palm_cycle)
+
+[effects]
+enabled = true            # glow and particles; E toggles them (cursors and previews always show)
+particle_cap = 1500       # pooled; when full, the particles closest to dying are reused
+glow_scale = 1.7          # halo radius = this x shape radius
+glow_intensity = 0.45     # additive halo brightness at its centre, 0..1
+impact_min_dv = 0.35      # sparks when a hit changes a shape's speed by more than this
+                          # (window heights/s); gentle settling in the pile stays quiet
+impact_max_particles = 24 # sparks per impact at most (scaled by how hard the hit was)
+burst_particles = 30      # per shape when both fists clear the screen
+release_particles = 12    # small burst where a new shape is released

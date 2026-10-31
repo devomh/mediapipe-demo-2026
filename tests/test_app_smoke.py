@@ -102,3 +102,22 @@ def test_keys_overlay_toggles_and_lists_only_usable_keys(cfg, clip):
         app.keys_overlay.draw(app.surface, app.hotkeys)
     finally:
         pygame.quit()
+
+
+def test_effects_key_toggles_geometry_effects_and_is_hidden_in_vision(cfg, clip):
+    pygame.init()
+    try:
+        app = App(cfg, ReplaySource(clip), RunOptions(scene="vision", max_frames=1))
+        assert "E" not in [h.label for h in app.hotkeys if h.is_available()]
+        app._on_key(pygame.K_e)  # no effect, no crash in Vision
+        app._on_key(pygame.K_2)
+        assert app.scene.effects_on is True
+        app._on_key(pygame.K_e)
+        assert app.scene.effects_on is False
+        hk = next(h for h in app.hotkeys if h.label == "E")
+        assert hk.is_available() and hk.state() == "off"
+        app._on_key(pygame.K_1)
+        app._on_key(pygame.K_2)  # a fresh Geometry scene starts from the config default
+        assert app.scene.effects_on is cfg.effects.enabled
+    finally:
+        pygame.quit()

@@ -1,4 +1,4 @@
-"""Shape palette and drawing. Glow sprites and pooled particles arrive with A.4 polish."""
+"""Shape palette, shape drawing, and hand cursors. Glow and particles: render/particles.py."""
 
 from __future__ import annotations
 
@@ -137,30 +137,61 @@ def draw_palette(surface: pygame.Surface, selected: str, chosen: bool) -> None:
             pygame.draw.polygon(surface, color, _rotated(kind, r, 0.0, cx, cy))
 
 
-HAND_COLOR = (220, 235, 255)
+# Each tracked hand gets its own cursor colour (by track id), distinct from the shape palette.
+HAND_COLORS = ((140, 225, 255), (255, 170, 225), (190, 255, 160), (255, 215, 140))
+
+
+def hand_color(hand_id: int) -> tuple[int, int, int]:
+    return HAND_COLORS[hand_id % len(HAND_COLORS)]
 
 
 def draw_paddle(
-    surface: pygame.Surface, pos: tuple[float, float], radius: float, strength: float = 1.0
+    surface: pygame.Surface,
+    pos: tuple[float, float],
+    radius: float,
+    strength: float = 1.0,
+    color: tuple[int, int, int] = HAND_COLORS[0],
 ) -> None:
     """Soft ring where the open hand pushes shapes; fades in (`strength` < 1) while arming."""
     size = round(radius * 2 + 6)
     layer = pygame.Surface((size, size), pygame.SRCALPHA)
     c = size / 2
     k = max(0.0, min(1.0, strength))
-    pygame.draw.circle(layer, (*HAND_COLOR, round(28 * k)), (c, c), radius)
-    pygame.draw.circle(layer, (*HAND_COLOR, round(110 * k)), (c, c), radius, 2)
+    pygame.draw.circle(layer, (*color, round(28 * k)), (c, c), radius)
+    pygame.draw.circle(layer, (*color, round(120 * k)), (c, c), radius, 2)
     surface.blit(layer, (round(pos[0] - c), round(pos[1] - c)))
 
 
-def draw_grab_ring(surface: pygame.Surface, pos: tuple[float, float], t: float) -> None:
-    """A fist holding a shape: a small ring that turns."""
+def draw_grab_ring(
+    surface: pygame.Surface,
+    pos: tuple[float, float],
+    t: float,
+    color: tuple[int, int, int] = HAND_COLORS[0],
+) -> None:
+    """A hand holding a shape: a small ring that turns."""
     center = (round(pos[0]), round(pos[1]))
     r = 16
     start = (t * 4.0) % (2 * math.pi)
     rect = pygame.Rect(center[0] - r, center[1] - r, 2 * r, 2 * r)
     pygame.draw.circle(surface, (40, 44, 60), center, r + 3)
-    pygame.draw.arc(surface, HAND_COLOR, rect, start, start + 4.2, 4)
+    pygame.draw.arc(surface, color, rect, start, start + 4.2, 4)
+
+
+def draw_pinch_dot(
+    surface: pygame.Surface, pos: tuple[float, float], color: tuple[int, int, int]
+) -> None:
+    """Where a pinch is (making or about to make a shape)."""
+    center = (round(pos[0]), round(pos[1]))
+    pygame.draw.circle(surface, (20, 22, 30), center, 9)
+    pygame.draw.circle(surface, color, center, 6)
+
+
+def draw_hand_marker(
+    surface: pygame.Surface, pos: tuple[float, float], color: tuple[int, int, int]
+) -> None:
+    """A hand the computer sees but that isn't doing anything yet: a faint small ring."""
+    center = (round(pos[0]), round(pos[1]))
+    pygame.draw.circle(surface, fade_to(color, (10, 12, 18), 0.55), center, 12, 2)
 
 
 def draw_progress_ring(surface: pygame.Surface, pos: tuple[float, float], frac: float) -> None:
@@ -172,25 +203,3 @@ def draw_progress_ring(surface: pygame.Surface, pos: tuple[float, float], frac: 
     if frac > 0:
         end = math.pi / 2
         pygame.draw.arc(surface, (255, 120, 90), rect, end - 2 * math.pi * frac, end, 7)
-
-
-class Sparkles:
-    """Short expanding rings, e.g. on release. Replaced by the particle system in A.4."""
-
-    def __init__(self, life: float = 0.35) -> None:
-        self.life = life
-        self._items: list[list] = []  # [x, y, hue, age]
-
-    def add(self, pos: tuple[float, float], hue: int) -> None:
-        self._items.append([pos[0], pos[1], hue, 0.0])
-
-    def update(self, dt: float) -> None:
-        for it in self._items:
-            it[3] += dt
-        self._items = [it for it in self._items if it[3] < self.life]
-
-    def draw(self, surface: pygame.Surface) -> None:
-        for x, y, hue, age in self._items:
-            k = age / self.life
-            color = fade_to(lighten(PALETTE[hue], 0.6), (10, 12, 18), 1.0 - k)
-            pygame.draw.circle(surface, color, (round(x), round(y)), round(8 + 40 * k), 2)

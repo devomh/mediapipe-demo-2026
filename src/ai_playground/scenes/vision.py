@@ -25,6 +25,7 @@ class VisionScene:
     def enter(self, ctx: AppContext) -> None:
         self.ctx = ctx
         ctx.background.mode = "full"
+        ctx.background.empty = "grid"
 
     def exit(self) -> None:
         self.ctx = None
