@@ -13,7 +13,8 @@ Supported: macOS on Apple Silicon (primary) and Ubuntu x86_64. Needs [uv](https:
 
 ```sh
 # Ubuntu only: PortAudio (mediapipe imports sounddevice, whose Linux wheel doesn't bundle it)
-sudo apt install libportaudio2
+# and EGL/GLES (MediaPipe loads them even for CPU inference). Desktop installs usually have them.
+sudo apt install libportaudio2 libegl1 libgles2
 
 uv sync --locked
 uv run python scripts/fetch_models.py      # gesture_recognizer.task, SHA-256 verified

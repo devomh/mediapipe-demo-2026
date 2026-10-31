@@ -23,9 +23,10 @@ jobs:
         # mediapipe imports sounddevice, whose Linux wheels don't bundle PortAudio. Ubuntu's
         # PortAudio fails to initialize (and so `import mediapipe` fails) when no PulseAudio
         # server is running, so the headless runner gets a silent one with a null sink.
+        # MediaPipe's native library loads EGL/GLES even when inference runs on the CPU.
         run: |
           sudo apt-get update
-          sudo apt-get install -y libportaudio2 libgl1 pulseaudio
+          sudo apt-get install -y libportaudio2 libgl1 libegl1 libgles2 pulseaudio
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink
 
