@@ -1,0 +1,125 @@
+# AI Playground — Project Plan
+
+*"Your hands are the controller."* A live, self-guided exhibit that uses MediaPipe hand tracking
+to get prospective students interested in data science and machine learning.
+
+Source brainstorm: [`ideas01.md`](ideas01.md). Specs: [`specs/`](specs/).
+
+---
+
+## 1. Goals and non-goals
+
+**Goals**
+
+- A fun, self-explanatory exhibit for an event. A visitor walks up, raises a hand, and is
+  creating something within ~10 seconds, with no instructions from staff.
+- Every mode can show the machine learning behind it (landmarks, numbers, predictions), and one
+  mode lets the visitor **train a model themselves**.
+- Runs offline on a single laptop: **MacBook (Apple Silicon)** as the primary machine and an
+  **Ubuntu laptop (x86_64)** as the secondary, from the same repo and `uv.lock`.
+
+**Non-goals (for now)**
+
+- A web/browser version. The brainstorm's "Phase 5 Web Exhibit" is out of scope. The portable
+  core rule ([architecture §4](specs/architecture.md#4-the-portable-core-rule)) keeps that option
+  open but costs nothing now.
+- Intel Macs and Windows. MediaPipe 1.2.0 ships wheels for Windows, but we neither test nor
+  support it.
+- GPU inference. CPU inference is fast enough for 2 hands at 640×480.
+
+## 2. Key decisions
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| D1 | Python 3.12, `uv`, committed `uv.lock`, `uv sync --locked` | Same environment on macOS arm64 and Linux x86_64 |
+| D2 | MediaPipe **Tasks API**, **Gesture Recognizer** task (not Hand Landmarker, not legacy `mp.solutions`) | Same 21 landmarks + handedness, plus 7 built-in gestures (`Closed_Fist`, `Open_Palm`, …) for free |
+| D3 | Use the `cv2` that MediaPipe brings in (`opencv-contrib-python`); never add `opencv-python` | Two `cv2` distributions in one environment conflict |
+| D4 | `pygame-ce` for window, rendering, and input, on the **main thread** | macOS requires UI on the main thread; one rendering stack for all modes |
+| D5 | `pymunk` for 2D physics | Collisions, joints, and collision callbacks without writing our own physics |
+| D6 | `sounddevice` + NumPy callback synth for audio | Low latency, no external synth; MediaPipe already depends on it |
+| D7 | `scikit-learn` (k-NN) for Train-a-Gesture | Students will meet the same library in class; training is instant |
+| D8 | Record **landmarks only, never video** | Privacy and consent at a public event, and a teaching point |
+| D9 | Gesture logic is pure NumPy and tested with recorded fixtures | Testable without a camera; CI runs on both OSes |
+| D10 | Train-a-Gesture ships in **Phase A** | It is the part that actually teaches ML, so it must not be cut |
+
+## 3. Phases
+
+```
+Phase 0  Foundation ──► Phase A  Magic Geometry + Train-a-Gesture ──► Phase B  AirSynth ──► Phase C  Physics Orchestra
+ (engine, no fun yet)    (first complete exhibit)                     (audio engine)         (A + B combined, exhibit polish)
+```
+
+Every phase ends with something that runs, can be demoed, and is tested on **both** macOS and
+Ubuntu.
+
+### Phase 0 — Foundation · [spec](specs/phase0-foundation.md)
+
+Camera → MediaPipe → identity tracking + smoothing → gesture engine → events, plus the
+**Vision scene** (landmarks, numbers, detected gestures) and landmark **record and replay**.
+
+**Exit criteria**
+
+- 2 hands tracked at ≥ 25 FPS (target 30) at 640×480 on the MacBook. Render loop at 60 FPS.
+- Pinch start/end shows no flicker during a 30 s hold, and fires within ≤ 2 frames of a real pinch.
+- Left/right labels are correct for the visitor (raise your right hand → "Right").
+- Pipeline latency (capture → displayed) is measured, shown in the HUD, and under 100 ms.
+- `--record` / `--replay` work. At least 6 fixture clips are committed. CI is green on macOS and Ubuntu.
+
+### Phase A — Magic Geometry + Train-a-Gesture · [spec](specs/phaseA-magic-geometry.md)
+
+Pinch to create shapes, throw them, push them with your hand, grab them with a fist. Gravity,
+collisions, colors, particles. Then **Train-a-Gesture**: record 3 poses, train k-NN live, and
+watch a 2D PCA map of your own data. Trained gestures trigger effects in Geometry. Includes the
+exhibit shell (attract screen, onboarding hints, operator hotkeys, fullscreen).
+
+**Exit criteria**
+
+- A first-time user (someone not on the team) creates and throws a shape within 10 s, unprompted.
+- Train-a-Gesture: 3 classes recorded and trained in under 60 s total, with ≥ 90 % live recognition
+  for the person who trained it.
+- 30-minute soak test with no crash and no frame-rate degradation.
+
+### Phase B — AirSynth · [spec](specs/phaseB-airsynth.md)
+
+A real-time audio engine plus two instruments: a **Theremin** (continuous pitch quantized to a
+pentatonic scale, other hand for volume and filter) and an **Invisible Piano** (note columns, pinch
+to play). Waveform/spectrum view as the "discover" layer.
+
+**Exit criteria**
+
+- No audible glitches (audio underruns = 0) over a 10-minute session while rendering at 60 FPS.
+- Gesture → sound latency < 100 ms (pipeline + audio buffer, measured).
+
+### Phase C — Physics Orchestra · [spec](specs/phaseC-physics-orchestra.md)
+
+Geometry shapes make sounds when they collide. Timbre comes from the shape, pitch from its size,
+volume from the impact. Hand "wind". Optional beat quantization. Final exhibit flow and
+operations checklist.
+
+**Exit criteria**
+
+- 2-hour soak test on both machines: no crash, no underruns, stable memory.
+- Full visitor flow (attract → play → discover → train) rehearsed with ≥ 5 people new to the exhibit.
+
+## 4. Working method
+
+- **Per-phase workflow:** refine that phase's spec → break it into issues → build → test on the
+  MacBook → test on the Ubuntu laptop → demo → tag a release (`v0.0`, `v0.A`, …).
+- Phase 0 and A specs are detailed. Phase B and C specs set direction and are refined once their
+  phase starts, with what we learned in earlier phases.
+- **Branching:** `main` is always runnable. Work happens on short feature branches with PRs, and CI
+  must pass.
+- **Fixtures are a team asset:** whenever a gesture misbehaves, record a clip of it, add it to
+  `tests/fixtures/`, and write a failing test before fixing it.
+
+## 5. Risks
+
+| Risk | Likelihood | Mitigation |
+|------|-----------|------------|
+| Venue lighting or backlight hurts tracking | High | Test in the venue early; ring light in the kit; `min_detection_confidence` in config |
+| Bystanders' hands get tracked | High | Ignore hands smaller than `min_hand_size` (far from camera); mark the floor spot |
+| Python audio callback underruns under rendering load | Medium | Larger block size; fall back to running audio in a separate process ([Phase B §2](specs/phaseB-airsynth.md#2-audio-engine-audioenginepy-audiovoicespy-audiodsppy)) |
+| macOS camera permission or wrong camera index on event day | Medium | Startup check with clear on-screen error; `--list-cameras`; ops checklist |
+| Gestures feel unreliable for new users | Medium | Small gesture vocabulary, hysteresis, onboarding hints, test with new users at every phase |
+| MediaPipe API change in a future release | Low | Version pinned in `uv.lock`; MediaPipe is called from one module only (`tracking/recognizer.py`) |
+| Ubuntu laptop missing system libraries (PortAudio) | Medium | `sudo apt install libportaudio2` in README; startup check |
