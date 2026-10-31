@@ -20,8 +20,14 @@ jobs:
 
       - name: System libraries (Ubuntu)
         if: runner.os == 'Linux'
-        # mediapipe imports sounddevice, whose Linux wheels don't bundle PortAudio.
-        run: sudo apt-get update && sudo apt-get install -y libportaudio2 libgl1
+        # mediapipe imports sounddevice, whose Linux wheels don't bundle PortAudio. Ubuntu's
+        # PortAudio fails to initialize (and so `import mediapipe` fails) when no PulseAudio
+        # server is running, so the headless runner gets a silent one with a null sink.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 libgl1 pulseaudio
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink
 
       - uses: astral-sh/setup-uv@v6
         with:

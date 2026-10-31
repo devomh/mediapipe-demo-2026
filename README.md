@@ -20,6 +20,10 @@ uv run python scripts/fetch_models.py      # gesture_recognizer.task, SHA-256 ve
 uv run ai-playground
 ```
 
+**Linux sound server:** `import mediapipe` initialises PortAudio, and Ubuntu's PortAudio fails
+with `PulseAudio_Initialize: Can't connect to server` if no sound server is running. A normal
+desktop session has one (PipeWire). Headless machines need `pulseaudio --start`.
+
 **macOS camera permission:** the first run asks for camera access for your *terminal app*
 (Terminal, iTerm, VS Code, …). If you denied it: System Settings › Privacy & Security › Camera →
 enable the terminal app, then restart it. **Linux:** your user needs to be in the `video` group.
