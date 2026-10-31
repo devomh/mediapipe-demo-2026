@@ -13,6 +13,7 @@ import pygame
 
 from ai_playground.config import Config
 from ai_playground.gestures.engine import GestureEngine
+from ai_playground.pacing import FramePacer
 from ai_playground.render import text
 from ai_playground.render.background import Background
 from ai_playground.render.hud import Hud, Stats
@@ -77,7 +78,8 @@ class App:
         self.hud = Hud(self.stats, cfg.hud.visible)
         self.keys_overlay = KeysOverlay(cfg.hud.keys_visible)
         self.hotkeys = self._hotkeys()
-        self.clock = pygame.time.Clock()
+        self.clock = pygame.time.Clock()  # error screen only
+        self.pacer = FramePacer(cfg.display.target_fps)
         self.recorder: Recorder | None = None
         self._rec_started = 0.0
         self.scene: Scene | None = None
@@ -188,6 +190,14 @@ class App:
                 available=lambda: hasattr(self.scene, "clear"),
             ),
             Hotkey(
+                (pygame.K_e,),
+                "E",
+                "Effects (glow, particles)",
+                lambda _k: setattr(self.scene, "effects_on", not self.scene.effects_on),
+                state=lambda: onoff(self.scene.effects_on),
+                available=lambda: hasattr(self.scene, "effects_on"),
+            ),
+            Hotkey(
                 (pygame.K_r,),
                 "R",
                 "Record landmarks",
@@ -251,7 +261,7 @@ class App:
                 if frame is not None:
                     self._process(frame)
 
-                dt = self.clock.tick(self.cfg.display.target_fps) / 1000.0
+                dt = self.pacer.tick()
                 assert self.scene is not None
                 self.scene.update(dt)
                 self.overlay.update(dt)
@@ -267,7 +277,7 @@ class App:
                 self.keys_overlay.draw(self.surface, self.hotkeys)
                 pygame.display.flip()
 
-                self.stats.render_fps = self.clock.get_fps()
+                self.stats.render_fps = self.pacer.fps
                 if new_frame:
                     now = time.monotonic()
                     self.stats.latency.add(now, now - frame.t_capture)

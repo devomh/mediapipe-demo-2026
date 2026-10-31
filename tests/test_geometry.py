@@ -132,20 +132,27 @@ def test_synthetic_finger_counts_are_what_they_claim(cfg):
     "n,kind", [(1, "circle"), (2, "bar"), (3, "triangle"), (4, "square"), (5, "pentagon")]
 )
 def test_other_hand_fingers_choose_the_next_shape(scene, cfg, n, kind):
+    # The hand that will pinch; a fist, so it doesn't choose anything itself.
+    maker = state(cfg, 1, 0, handedness="Right", center=(0.7, 0.5))
     other = state(cfg, 2, n)
-    hold(scene, cfg, [other])
+    hold(scene, cfg, [maker, other])
     assert scene.selection() == (kind, True)
-    scene.handle([ev("pinch_start", 1.0, hand=1)], [other])
+    scene.handle([ev("pinch_start", 1.0, hand=1)], [maker, other])
     assert scene.pending[1].kind == kind and scene.pending[1].chosen
 
 
 def test_choice_needs_a_steady_count(scene, cfg):
-    hold(scene, cfg, [state(cfg, 2, 3)], frames=cfg.geometry.choose_frames - 1)
+    maker = state(cfg, 1, 0, handedness="Right", center=(0.7, 0.5))  # a fist chooses nothing
+
+    def show(n, frames):
+        hold(scene, cfg, [maker, state(cfg, 2, n)], frames=frames)
+
+    show(3, cfg.geometry.choose_frames - 1)
     assert scene.selection() == ("circle", False)  # not yet: still the automatic "next"
-    scene.handle([], [state(cfg, 2, 4)])  # count changed: starts over
-    hold(scene, cfg, [state(cfg, 2, 4)], frames=cfg.geometry.choose_frames - 2)
+    show(4, 1)  # count changed: starts over
+    show(4, cfg.geometry.choose_frames - 2)
     assert scene.selection()[1] is False
-    scene.handle([], [state(cfg, 2, 4)])
+    show(4, 1)
     assert scene.selection() == ("square", True)
 
 
@@ -582,3 +589,77 @@ def test_closing_the_palm_restarts_paddle_arming(scene, cfg):
     scene.update(1 / 60)
     scene.handle([], [open_hand])
     assert scene.play.arming[1][2] < 0.1  # starts over
+
+
+# --- A.4: particles, glow, cursors ----------------------------------------------------------
+
+
+def test_hard_impact_sparks_but_resting_shapes_do_not(scene, cfg):
+    piece = scene.world.spawn("square", (640, 100), 40, vel=(0, 1500))
+    sparked = 0
+    for _ in range(60):
+        scene.update(1 / 60)
+        sparked = max(sparked, scene.particles.alive)
+    assert sparked > 0  # it hit the floor hard
+    for _ in range(240):  # let it settle and the sparks die out
+        scene.update(1 / 60)
+    assert scene.particles.alive == 0 and piece.body.is_sleeping
+
+
+def test_release_and_clear_emit_particles(scene, cfg):
+    scene.handle([ev("pinch_start", 0.0), ev("pinch_end", 0.5, reason="released")], [])
+    assert scene.particles.alive == cfg.effects.release_particles
+    scene.particles.clear()
+    for i in range(3):
+        scene.world.spawn("circle", (300 + 200 * i, 300), 30)
+    scene._burst()  # 3 new shapes plus the one the pinch made
+    assert scene.particles.alive == 4 * cfg.effects.burst_particles
+    assert scene.world.pieces == []
+
+
+def test_every_cursor_state_draws(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.3, 0.5))
+    scene.world.spawn("square", palm_px(scene, fist), 40)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])  # holding: grab ring
+    arming = state(cfg, 2, 5, center=(0.7, 0.5))
+    pinching = state(cfg, 3, 5, pinching=True, center=(0.5, 0.3))
+    idle = state(cfg, 4, 2, center=(0.5, 0.7))
+    hands = [fist, arming, pinching, idle]
+    for _ in range(40):  # long enough for hand 2 to arm into a paddle
+        scene.handle([], hands)
+        scene.update(1 / 60)
+        scene.draw(scene.surface)
+    assert scene.world.hands[2].shape is not None
+
+
+def test_geometry_uses_a_gradient_without_camera(scene):
+    assert scene.ctx.background.empty == "gradient"
+    scene.draw(scene.surface)
+    top, bottom = scene.surface.get_at((640, 2)), scene.surface.get_at((640, 717))
+    assert sum(top[:3]) > sum(bottom[:3])  # lighter at the top
+
+
+def test_a_lone_hand_is_not_shown_as_choosing(scene, cfg):
+    """With one hand, that hand will make the next pinch, so the palette shows the cycle."""
+    hold(scene, cfg, [state(cfg, 1, 5)])
+    assert scene.selection() == ("circle", False)
+    hold(scene, cfg, [state(cfg, 1, 5), state(cfg, 2, 3, center=(0.7, 0.5))])
+    assert scene.selection()[1] is True  # two hands: one of them may be choosing
+
+
+def test_effects_toggle_hides_glow_and_particles_but_not_feedback(scene, cfg):
+    assert scene.effects_on is cfg.effects.enabled
+    scene.handle([ev("pinch_start", 0.0), ev("pinch_end", 0.5, reason="released")], [])
+    assert scene.particles.alive > 0
+    scene.effects_on = False
+    assert scene.particles.alive == 0  # cleared, nothing stale when switched back on
+    scene.handle([ev("pinch_start", 1.0, pos=(0.2, 0.3))], [])
+    scene.handle([ev("pinch_end", 1.5, pos=(0.2, 0.3), reason="released")], [])
+    scene._burst()
+    assert scene.particles.alive == 0  # no emission while off
+    scene.handle([ev("pinch_start", 2.0, pos=(0.6, 0.3))], [])
+    scene.draw(scene.surface)
+    assert scene.pending  # previews and shapes still work
+    scene.effects_on = True
+    scene.handle([ev("pinch_end", 2.5, pos=(0.6, 0.3), reason="released")], [])
+    assert scene.particles.alive == cfg.effects.release_particles

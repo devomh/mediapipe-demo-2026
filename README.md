@@ -59,6 +59,7 @@ uv run ai-playground --debug                  # logs every gesture event as JSON
 | `F` | Fullscreen |
 | `1` / `2` | Vision / Geometry scene |
 | `C` | Clear all shapes (Geometry) |
+| `E` | Effects on/off: glow and particles (Geometry); cursors and previews always show |
 | `Esc` | Quit |
 
 Every threshold lives in [`config/default.toml`](config/default.toml). A venue file only needs

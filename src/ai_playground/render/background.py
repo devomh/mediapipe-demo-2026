@@ -19,13 +19,18 @@ class Background:
         self._scaled: pygame.Surface | None = None
         self._dim: pygame.Surface | None = None
         self._dim_key: tuple | None = None
+        self.empty = "grid"  # drawn when there is no camera image: "grid" or "gradient"
+        self._gradient: pygame.Surface | None = None
 
     def cycle(self) -> None:
         self.mode = MODES[(MODES.index(self.mode) + 1) % len(MODES)]
 
     def draw(self, surface: pygame.Surface, vp: Viewport, image: np.ndarray | None) -> None:
         if image is None or self.mode == "hidden":
-            draw_grid(surface, vp)
+            if self.empty == "gradient":
+                self._draw_gradient(surface)
+            else:
+                draw_grid(surface, vp)
             return
         h, w = image.shape[:2]
         src = pygame.image.frombuffer(image.data, (w, h), "RGB")
@@ -40,6 +45,15 @@ class Background:
                 self._dim.fill((0, 0, 0, round(255 * (1.0 - self.dim_brightness))))
                 self._dim_key = key
             surface.blit(self._dim, (0, 0))
+
+    def _draw_gradient(self, surface: pygame.Surface) -> None:
+        size = surface.get_size()
+        if self._gradient is None or self._gradient.get_size() != size:
+            top, bottom = np.array((18, 20, 38), np.float32), np.array((6, 7, 12), np.float32)
+            k = np.linspace(0.0, 1.0, size[1], dtype=np.float32)[None, :, None]
+            col = (top + (bottom - top) * k).astype(np.uint8)  # (1, h, 3)
+            self._gradient = pygame.surfarray.make_surface(np.repeat(col, size[0], axis=0))
+        surface.blit(self._gradient, (0, 0))
 
 
 def draw_grid(surface: pygame.Surface, vp: Viewport, step: float = 0.1) -> None:

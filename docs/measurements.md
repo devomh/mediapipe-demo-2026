@@ -44,4 +44,22 @@ Main-loop stage costs, two synthetic hands, mean (p95) in ms:
 Synthetic gesture checks (`tests/test_engine.py`): fast pinch fires 1 frame after the raw
 crossing (criterion ≤ 2); a 30 s noisy pinch hold gives 1 start and no flicker.
 
+### Phase A.4: 40 shapes + 1,500 particles (2026-10-31)
+
+Exit criterion: 60 FPS with 40 bodies and 1,500 particles. Full Geometry frame: camera
+background, glows, shapes, particles, hand cursors, palette, HUD, keys overlay.
+
+| Measurement | 1280×720 | 1920×1080 |
+|---|---|---|
+| Frame work, mean / p95 (synthetic, real window) | 5.1 / 5.6 ms | 7.2 / 7.5 ms |
+| 40 additive glows (all shapes at max stretch size) | 0.72 ms | 1.62 ms |
+| 1,500 particles: update / draw | 0.06 / 0.64 ms | 0.07 / 0.64 ms |
+| **Live camera, real app** | **60.0 FPS render**; camera 30.0 FPS; inference 8.8 / 10.0 ms; latency 33.7 / 35.2 ms | – |
+
+- Render rate is set by frame pacing, not work: `pygame.time.Clock.tick(60)` gave 58.9–59.1 FPS
+  with 5 ms of work per frame; the app now sleeps until ~1.5 ms before the deadline and then
+  spins (`pacing.py`), giving 60.0 FPS without slowing the camera worker.
+- Glow sprites are scaled from one base per colour: computing a large gradient directly took
+  5–12 ms (a hitch while stretching a big shape at 1080p), scaling takes ≤ 0.64 ms.
+
 ## Ubuntu laptop (x86_64): pending

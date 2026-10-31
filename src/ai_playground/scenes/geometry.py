@@ -7,7 +7,7 @@
 - A.3: open palm = paddle, fist or pinch on a shape = grab and throw, both fists = clear
   (scenes/geometry_hands.py).
 
-Glow and particles (A.4) come later.
+- A.4: glow behind shapes, particles (impacts, releases, clear), hand cursors per track colour.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import pygame
 from ai_playground.gestures.engine import HandState
 from ai_playground.physics.world import KINDS, World
 from ai_playground.render import effects
+from ai_playground.render.particles import GlowCache, Particles
 from ai_playground.scenes.base import AppContext
 from ai_playground.scenes.geometry_hands import HandPlay
 from ai_playground.types import GestureEvent
@@ -82,7 +83,9 @@ class GeometryScene:
         self.ctx: AppContext | None = None
         self.world: World | None = None
         self.pending: dict[int, Pending] = {}  # by the hand that started it
-        self.sparkles = effects.Sparkles()
+        self.particles = Particles(seed=seed)
+        self.glow = GlowCache()
+        self._effects_on = True
         self.chooser = FingerChooser(5)
         self._rng = random.Random(seed)
         self._last_hue: int | None = None
@@ -106,6 +109,11 @@ class GeometryScene:
             busy=lambda hid: hid in self.pending or hid in self._owner,
             on_clear=self._burst,
         )
+        e = ctx.config.effects
+        self.particles = Particles(e.particle_cap, seed=self._rng.randrange(2**31))
+        self.glow = GlowCache(e.glow_scale, e.glow_intensity)
+        self.effects_on = e.enabled
+        ctx.background.empty = "gradient"
         ctx.background.mode = "dim"
         ctx.background.dim_brightness = ctx.config.geometry.background_brightness
 
@@ -125,13 +133,49 @@ class GeometryScene:
         if self.world is not None:
             self.world.clear()
 
+    @property
+    def effects_on(self) -> bool:
+        """Glow and particles (decoration). Cursors, previews, and the palette always show."""
+        return self._effects_on
+
+    @effects_on.setter
+    def effects_on(self, on: bool) -> None:
+        self._effects_on = on
+        if not on:
+            self.particles.clear()  # nothing stale bursts out when they come back on
+
+    def _emit(self, *args, **kwargs) -> None:
+        if self._effects_on:
+            self.particles.emit(*args, **kwargs)
+
     def _burst(self) -> None:
-        """Two-fist clear: every shape bursts (sparkles until A.4's particles)."""
-        assert self.world is not None
+        """Two-fist clear: every shape bursts into particles of its colour."""
+        assert self.world is not None and self.ctx is not None
+        h = self.ctx.viewport.window_size[1]
+        n = self.ctx.config.effects.burst_particles
         for piece in self.world.pieces:
             pos = piece.body.position
-            self.sparkles.add((pos.x, pos.y), piece.hue)
+            self._emit(n, (pos.x, pos.y), piece.hue, speed=(0.2 * h, 0.9 * h), life=(0.6, 1.3))
         self.clear()
+
+    def _sparks(self) -> None:
+        """Particles where shapes hit hard. Hardness = the speed change of the lighter shape,
+        so a big shape settling in the pile stays quiet and a thrown one sparks."""
+        assert self.world is not None and self.ctx is not None
+        e, h = self.ctx.config.effects, self.ctx.viewport.window_size[1]
+        threshold = e.impact_min_dv * h
+        budget = 4 * e.impact_max_particles  # per frame, so a collapsing pile can't flood the pool
+        for imp in self.world.impacts:
+            pieces = [p for p in imp.pieces if p is not None]
+            if not pieces or budget <= 0:
+                continue
+            dv = imp.impulse / min(p.body.mass for p in pieces)
+            if dv < threshold:
+                continue
+            n = min(e.impact_max_particles, budget, round(4 * dv / threshold))
+            budget -= n
+            v = min(dv, 2.0 * h)
+            self._emit(n, imp.pos, pieces[0].hue, speed=(0.15 * v, 0.5 * v), life=(0.25, 0.6))
 
     # --- helpers ------------------------------------------------------------------------
     def _px(self, pos: tuple[float, float]) -> tuple[float, float]:
@@ -150,7 +194,13 @@ class GeometryScene:
         return (vel[0] * vp.dest_size[0] * gain, vel[1] * vp.dest_size[1] * gain)
 
     def chosen_kind(self, maker: int | None = None) -> str | None:
-        """The kind another visible, non-pinching hand is choosing with its fingers, if any."""
+        """The kind another visible, non-pinching hand is choosing with its fingers, if any.
+
+        Choosing takes two hands: with `maker` unknown (the palette asking about the next
+        pinch), a lone hand is the one that will pinch, so it can't be choosing.
+        """
+        if maker is None and sum(h.visible for h in self._hands) < 2:
+            return None
         for h in self._hands:
             if h.id == maker or not h.visible or h.pinching or h.id in self._pinch:
                 continue
@@ -196,7 +246,9 @@ class GeometryScene:
         if p.partner is not None:
             self._owner.pop(p.partner, None)
         self.world.spawn(p.kind, p.pos, p.radius, vel=vel, angle=p.angle, hue=p.hue)
-        self.sparkles.add(p.pos, p.hue)
+        assert self.ctx is not None
+        n, h = self.ctx.config.effects.release_particles, self.ctx.viewport.window_size[1]
+        self._emit(n, p.pos, p.hue, speed=(0.05 * h, 0.25 * h), life=(0.2, 0.45), size=0)
 
     # --- input --------------------------------------------------------------------------
     def handle(self, events: Sequence[GestureEvent], hands: Sequence[HandState]) -> None:
@@ -263,27 +315,23 @@ class GeometryScene:
         assert self.play is not None
         self.play.update(dt)
         self.world.step(dt)
-        self.sparkles.update(dt)
+        self._sparks()
+        self.particles.update(dt, gravity=0.5 * self.world.space.gravity.y)
 
     def draw(self, surface: pygame.Surface) -> None:
-        assert self.ctx is not None and self.world is not None
+        assert self.ctx is not None and self.world is not None and self.play is not None
         frame = self.ctx.frame
         self.ctx.background.draw(surface, self.ctx.viewport, frame.image if frame else None)
-        assert self.play is not None
+        # Light first (additive), then solid shapes on top of their own halos.
+        if self._effects_on:
+            for piece in self.world.pieces:
+                pos = piece.body.position
+                self.glow.draw(surface, (pos.x, pos.y), piece.hue, piece.radius, piece.alpha)
+            for p in self.pending.values():
+                self.glow.draw(surface, p.pos, p.hue, p.radius)
         held = {id(p) for p in self.play.held.values()}
         for piece in self.world.pieces:
             effects.draw_piece(surface, piece, highlight=id(piece) in held)
-        for hid, hb in self.world.hands.items():
-            pos = (hb.body.position.x, hb.body.position.y)
-            if hb.shape is not None:
-                effects.draw_paddle(surface, pos, hb.shape.radius)
-            elif hid in self.play.held:
-                effects.draw_grab_ring(surface, pos, self._t)
-        for pos, radius, frac in self.play.arming.values():
-            effects.draw_paddle(surface, pos, radius, strength=frac)
-        if self.play.clear_progress > 0:
-            for pos in self.play.fist_pos.values():
-                effects.draw_progress_ring(surface, pos, self.play.clear_progress)
         for owner, p in self.pending.items():
             if p.partner is not None and owner in self._pinch and p.partner in self._pinch:
                 effects.draw_stretch_line(
@@ -292,5 +340,34 @@ class GeometryScene:
             effects.draw_preview(
                 surface, p.kind, p.pos, p.radius, p.hue, self._t, p.angle, ring=p.partner is None
             )
-        self.sparkles.draw(surface)
+        if self._effects_on:
+            self.particles.draw(surface)
+        self._draw_cursors(surface)
         effects.draw_palette(surface, *self.selection())
+
+    def _draw_cursors(self, surface: pygame.Surface) -> None:
+        """Every visible hand shows what it is doing, in its own colour."""
+        assert self.ctx is not None and self.world is not None and self.play is not None
+        play, vp = self.play, self.ctx.viewport
+        for s in self._hands:
+            if not s.visible:
+                continue
+            color = effects.hand_color(s.id)
+            palm = vp.to_px(*s.features.palm_center)
+            hb = self.world.hands.get(s.id)
+            if s.id in play.held and hb is not None:
+                effects.draw_grab_ring(surface, tuple(hb.body.position), self._t, color)
+            elif hb is not None and hb.shape is not None:
+                effects.draw_paddle(surface, tuple(hb.body.position), hb.shape.radius, color=color)
+            elif s.id in play.arming:
+                pos, radius, frac = play.arming[s.id]
+                effects.draw_paddle(surface, pos, radius, strength=frac, color=color)
+            elif s.pinching or s.id in self._pinch:
+                effects.draw_pinch_dot(surface, vp.to_px(*s.features.pinch_point), color)
+            else:
+                effects.draw_hand_marker(surface, palm, color)
+            if s.id in play.held and s.pinching:
+                effects.draw_pinch_dot(surface, vp.to_px(*s.features.pinch_point), color)
+        if play.clear_progress > 0:
+            for pos in play.fist_pos.values():
+                effects.draw_progress_ring(surface, pos, play.clear_progress)
