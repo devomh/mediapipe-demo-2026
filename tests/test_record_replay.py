@@ -98,3 +98,24 @@ def test_latest_slot_newest_wins():
     s.put("b")
     assert s.get_newer(0) == (2, "b")
     assert s.get_newer(2) == (2, None)
+
+
+def test_crop_recording_keeps_and_retimes_a_window(tmp_path):
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "crop_recording", Path(__file__).parents[1] / "scripts" / "crop_recording.py"
+    )
+    crop_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(crop_mod)
+
+    src, dst = tmp_path / "full.jsonl.gz", tmp_path / "crop.jsonl.gz"
+    write_clip(src, n=30, marks=[0.2, 0.5, 0.9])  # frames at 0, 1/30, ... 29/30 s
+    frames, marks = crop_mod.crop(src, dst, start=0.3, end=0.7)
+    clip = replay.load_clip(dst)
+    assert frames == len(clip.frames) == 12  # 0.3 <= t < 0.7 at 30 FPS
+    assert clip.frames[0].t_capture == 0.0
+    assert clip.frames[0].seq == 10  # frame 9 (t = 0.3 s); original sequence numbers are kept
+    assert [m.t for m in clip.marks] == [pytest.approx(0.5 - 0.3, abs=1e-3)]
+    assert "cropped 0.3-0.7 s of full.jsonl.gz" in clip.header["note"]

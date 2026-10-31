@@ -36,7 +36,10 @@ enable the terminal app, then restart it. **Linux:** your user needs to be in th
 uv run ai-playground                          # live camera, Vision scene
 uv run ai-playground --scene geometry         # Magic Geometry: pinch, hold, release / throw;
                                               # other hand: 1-5 fingers picks the shape;
-                                              # pinch with both hands to stretch one shape
+                                              # pinch with both hands to stretch one shape;
+                                              # open palm (held) pushes; fist or pinch ON a
+                                              # shape grabs it, release to throw;
+                                              # both fists for 1.5 s clear everything
 uv run ai-playground --list-cameras           # which camera indices work
 uv run ai-playground --camera 1 --fullscreen --display 1
 uv run ai-playground --config venue.toml      # venue overrides, deep-merged over config/default.toml
@@ -81,6 +84,14 @@ uv run ai-playground --record tests/fixtures/right_pinch_x5.jsonl.gz \
 
 The full list of clips and what each one tests is in
 [Phase 0 §9](docs/specs/phase0-foundation.md#9-fixture-set-recorded-in-milestone-03-committed-to-testsfixtures).
+To keep only part of a take, crop it by time (seconds from the first frame, as the replay
+shows them), writing to a new file:
+
+```sh
+uv run python scripts/crop_recording.py recordings/take.jsonl.gz tests/fixtures/clip.jsonl.gz \
+    --start 12.75 --end 20.9
+```
+
 When a gesture misbehaves, record it, add it as a fixture, and write a failing test first.
 
 ## Development
