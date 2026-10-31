@@ -52,8 +52,11 @@ Milestone 0.1 can be done on any machine. From 0.2 on, development happens on th
 - Worker loop: `read()` → `t_capture = monotonic()` → `cv2.flip(frame, 1)` → BGR→RGB →
   `recognize_for_video(mp.Image(...), timestamp_ms)` → build `HandFrame` → `slot.put(frame)`.
   The timestamp must be strictly increasing, so derive it from `t_capture`.
-- **Mirroring:** flipping before inference means MediaPipe's handedness matches the visitor's own
-  left/right. Milestone 0.2 must verify this on screen ("raise your right hand").
+- **Mirroring:** we flip before inference so the screen behaves like a mirror. MediaPipe's docs
+  suggest its handedness then matches the visitor's own left/right, but the milestone 0.2 check
+  on screen ("raise your right hand") showed the opposite: right hand, mirror view, labelled
+  "Left". `recognizer.py` therefore swaps the label, and `Hand.handedness` is always the
+  visitor's own hand.
 - `recognizer.py` is the only file that imports `mediapipe`. It converts results into `Hand`
   objects (NumPy arrays), so nothing downstream sees MediaPipe types.
 - Stop cleanly: worker checks a stop `Event`, releases the camera, closes the recognizer.
@@ -96,9 +99,14 @@ Milestone 0.1 can be done on any machine. From 0.2 on, development happens on th
 4. **Stable handedness:** a track's handedness is the majority vote over its last 15 frames.
    MediaPipe sometimes swaps labels for a frame or two.
 5. **Smoothing:** each track has a vectorized **One Euro filter** over its (21, 3) image landmarks
-   and its (21, 3) world landmarks, timed by `t_capture`. Defaults: `min_cutoff=1.0`,
-   `beta=0.02`, `d_cutoff=1.0`. These are config values, tuned in milestone 0.4 against the
-   jitter and lag seen in fixtures.
+   and its (21, 3) world landmarks, timed by `t_capture`. Defaults: `d_cutoff=1.0`; image
+   `min_cutoff=1.0, beta=10`; world `min_cutoff=3.0, beta=60`. They are set separately because
+   the units differ (normalized units/s vs metres/s) and because world landmarks drive pinch
+   timing. These are config values, tuned against the jitter and lag seen in fixtures.
+   *Changed during implementation:* the original `min_cutoff=1.0, beta=0.02` is a setting for
+   pixel units. On our units it delayed `pinch_start` by 9 frames (~300 ms) on a synthetic fast
+   pinch. World smoothing was then lightened again on the recorded fixtures, where it still
+   delayed real pinches by 3 frames; it now gives 1–2 frames (`tests/test_fixtures.py`).
 
 ## 7. Features (`gestures/features.py`, portable core)
 
@@ -110,7 +118,7 @@ landmarks**, so they don't depend on how far the hand is from the camera.
 | `palm_length` | ‖w[0] − w[9]‖ (wrist → middle MCP) |
 | `pinch_ratio(finger)` | ‖w[4] − w[tip(finger)]‖ / palm_length. Pinched ≈ 0.1–0.2, open ≈ 0.8–1.2 |
 | `pinch_point` | midpoint of image landmarks 4 and 8 (normalized screen coordinates) |
-| `finger_extended[5]` | non-thumb fingers: joint angle at PIP > 160°; thumb: angle at IP > 150° **and** tip far from index MCP. Thresholds in config |
+| `finger_extended[5]` | non-thumb fingers: ‖tip − wrist‖ / ‖PIP − wrist‖ > 1.2; thumb: ‖tip − pinky MCP‖ / palm_length > 0.85. Thresholds in config. *(Changed from joint angles: on real world landmarks curled fingers measured up to 152° at the PIP and extended ones as low as 161°, and thumb IP angles overlapped the same way (143° open vs 146° folded). The distance rules separate them on the sample images and a live recording: fingers: extended median 1.38 but down to ~1.1 while a hand enters the frame, curled ≤ 1.17 (fist seen edge-on), so the bands touch and fixtures should tune this; thumb ≥ 0.88 vs ≤ 0.79; `tests/test_recognizer.py`.)* |
 | `finger_count` | number of extended fingers |
 | `palm_center` | mean of image landmarks 0, 5, 9, 13, 17 |
 | `palm_roll` | angle of image vector 5 → 17 (radians), used for the AirSynth filter |
@@ -123,13 +131,21 @@ Each detector is a small state machine per hand track. Each frame it gets the ha
 returns zero or more events.
 
 **PinchDetector (thumb + index)**
-- `IDLE → PINCHED` when `pinch_ratio < enter` (0.25) for `min_frames` (2) consecutive frames → emit `pinch_start`.
-- `PINCHED → IDLE` when `pinch_ratio > exit` (0.40) for `min_frames` frames → emit `pinch_end`.
+- `IDLE → PINCHED` when `pinch_ratio < enter` (0.35) **and** the index finger is not curling
+  (`index_extension ≥ 0.98`, tip→wrist ÷ PIP→wrist) for `min_frames` (2) consecutive frames → emit `pinch_start`.
+- `PINCHED → IDLE` when `pinch_ratio > exit` (0.50) for `min_frames` frames → emit `pinch_end`.
   The event carries the release velocity, needed for throwing in Phase A.
 - While `PINCHED`, emit `pinch_move` every frame with `pos = pinch_point` and
   `strength = clamp(1 − ratio/enter)`.
 - Having two thresholds (hysteresis) is what prevents flicker. Thresholds are configurable and
   tuned with fixtures.
+- *Changed during implementation (tuned on the `right_pinch_x5`, `right_pinch_hold`, and
+  `fist_palm_cycle` fixtures):* the original 0.25 / 0.40 missed real pinches, which close to
+  0.10–0.33 depending on pinch style, and split a held pinch that drifted up to 0.42 while the
+  hand moved. Open hands stay above 0.47 (p1). Raising the thresholds alone let closing fists
+  through (they pass 0.25–0.40 for a few frames before MediaPipe labels them `Closed_Fist`), so
+  pinch start also requires an index finger that isn't curling: closing fists measure < 0.95,
+  real pinches ≥ 1.02. `min_frames` must stay at 2; with 1, fists get through again.
 
 **BuiltinGestureDetector:** fist (`Closed_Fist`) and palm (`Open_Palm`)
 - Start when the category is seen with `score ≥ 0.6` for 3 consecutive frames. End when it is

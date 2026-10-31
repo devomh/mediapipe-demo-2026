@@ -122,4 +122,5 @@ operations checklist.
 | macOS camera permission or wrong camera index on event day | Medium | Startup check with clear on-screen error; `--list-cameras`; ops checklist |
 | Gestures feel unreliable for new users | Medium | Small gesture vocabulary, hysteresis, onboarding hints, test with new users at every phase |
 | MediaPipe API change in a future release | Low | Version pinned in `uv.lock`; MediaPipe is called from one module only (`tracking/recognizer.py`) |
-| Ubuntu laptop missing system libraries (PortAudio) | Medium | `sudo apt install libportaudio2` in README; startup check |
+| Ubuntu laptop missing system libraries (PortAudio) | Medium | `sudo apt install libportaudio2` in README; startup check. Needed from Phase 0: `import mediapipe` imports `sounddevice` |
+| Duplicate SDL2 on macOS: the OpenCV wheel bundles its own (via FFmpeg) next to pygame-ce's; the ObjC runtime warns of "mysterious crashes" | Low | Import pygame before cv2/mediapipe everywhere (`__main__.py`, `tests/conftest.py`); watch for it in soak tests. The headless OpenCV wheel bundles SDL2 too, so swapping wheels doesn't help |
