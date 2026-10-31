@@ -13,10 +13,12 @@ GRID_COLOR = (30, 34, 46)
 
 
 class Background:
-    def __init__(self, mode: str = "full") -> None:
+    def __init__(self, mode: str = "full", dim_brightness: float = 0.33) -> None:
         self.mode = mode
+        self.dim_brightness = dim_brightness  # camera brightness in "dim" mode, 0..1
         self._scaled: pygame.Surface | None = None
         self._dim: pygame.Surface | None = None
+        self._dim_key: tuple | None = None
 
     def cycle(self) -> None:
         self.mode = MODES[(MODES.index(self.mode) + 1) % len(MODES)]
@@ -32,9 +34,11 @@ class Background:
         pygame.transform.scale(src, vp.dest_size, self._scaled)
         surface.blit(self._scaled, (round(vp.offset[0]), round(vp.offset[1])))
         if self.mode == "dim":
-            if self._dim is None or self._dim.get_size() != surface.get_size():
+            key = (surface.get_size(), self.dim_brightness)
+            if self._dim is None or self._dim_key != key:
                 self._dim = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-                self._dim.fill((0, 0, 0, 170))
+                self._dim.fill((0, 0, 0, round(255 * (1.0 - self.dim_brightness))))
+                self._dim_key = key
             surface.blit(self._dim, (0, 0))
 
 

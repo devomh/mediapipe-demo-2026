@@ -64,4 +64,24 @@ target_fps = 60
 
 [hud]
 visible = true
+keys_visible = true       # the K overlay listing operator keys; set false at a venue
 latency_window_s = 2.0
+
+[physics]
+gravity_factor = 1.6      # gravity = this x window height, in px/s^2 (same feel at any resolution)
+steps_per_second = 120    # fixed physics timestep
+max_substeps = 4          # per rendered frame; a slow frame drops time instead of spiralling
+elasticity = 0.6
+friction = 0.6
+max_bodies = 40           # spawning one more fades out the oldest
+fade_s = 0.5
+sleep_time_s = 0.5        # resting bodies stop being simulated
+max_speed = 4.0           # throw speed cap in window heights/s (no tunnelling through walls)
+max_rise = 1.0            # a throw rises at most this many window heights, so it comes back fast
+
+[geometry]
+min_size = 0.03           # shape radius when a pinch starts, in window heights...
+max_size = 0.12           # ...growing to this while the pinch is held
+inflate_s = 1.5
+throw_gain = 1.0          # release velocity multiplier
+background_brightness = 0.25

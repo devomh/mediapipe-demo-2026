@@ -4,8 +4,9 @@
 to get prospective students interested in data science and machine learning.
 
 Plan and specs: [`docs/PLAN.md`](docs/PLAN.md) · [`docs/specs/`](docs/specs/).
-**Status:** Phase 0 (foundation): camera → MediaPipe → tracking → gesture events, the Vision
-scene, and record/replay.
+**Status:** Phase 0 (foundation) is done: camera → MediaPipe → tracking → gesture events, the
+Vision scene, and record/replay. Phase A in progress: Magic Geometry (pinch to make, inflate, drop
+and throw shapes).
 
 ## Setup
 
@@ -33,6 +34,7 @@ enable the terminal app, then restart it. **Linux:** your user needs to be in th
 
 ```sh
 uv run ai-playground                          # live camera, Vision scene
+uv run ai-playground --scene geometry         # Magic Geometry: pinch, hold, release / throw
 uv run ai-playground --list-cameras           # which camera indices work
 uv run ai-playground --camera 1 --fullscreen --display 1
 uv run ai-playground --config venue.toml      # venue overrides, deep-merged over config/default.toml
@@ -42,6 +44,7 @@ uv run ai-playground --debug                  # logs every gesture event as JSON
 
 | Key | Action |
 |-----|--------|
+| `K` | Show/hide this list of keys on screen, with each toggle's current state |
 | `V` | Vision overlay (skeleton, panels, numbers) |
 | `H` | HUD (camera FPS, inference, render FPS, latency) |
 | `B` | Background: camera → dimmed → hidden |
@@ -49,6 +52,8 @@ uv run ai-playground --debug                  # logs every gesture event as JSON
 | `R` | Start/stop recording to `recordings/YYYYmmdd-HHMMSS.jsonl.gz` |
 | `Space` | Ground-truth mark (while recording) |
 | `F` | Fullscreen |
+| `1` / `2` | Vision / Geometry scene |
+| `C` | Clear all shapes (Geometry) |
 | `Esc` | Quit |
 
 Every threshold lives in [`config/default.toml`](config/default.toml). A venue file only needs

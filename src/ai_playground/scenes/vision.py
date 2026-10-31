@@ -17,12 +17,14 @@ from ai_playground.types import GestureEvent
 
 class VisionScene:
     name = "vision"
+    show_vision = True
 
     def __init__(self) -> None:
         self.ctx: AppContext | None = None
 
     def enter(self, ctx: AppContext) -> None:
         self.ctx = ctx
+        ctx.background.mode = "full"
 
     def exit(self) -> None:
         self.ctx = None

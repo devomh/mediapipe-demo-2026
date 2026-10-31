@@ -79,3 +79,26 @@ def test_cli_replay(clip):
 
 def test_cli_rejects_unknown_scene(clip):
     assert main(["--replay", str(clip), "--scene", "nope"]) == 2
+
+
+def test_keys_overlay_toggles_and_lists_only_usable_keys(cfg, clip):
+    pygame.init()
+    try:
+        app = App(cfg, ReplaySource(clip), RunOptions(scene="vision", max_frames=1))
+        assert app.keys_overlay.visible == cfg.hud.keys_visible
+        app._on_key(pygame.K_k)
+        assert app.keys_overlay.visible != cfg.hud.keys_visible
+
+        def listed():
+            return [h.label for h in app.hotkeys if h.is_available()]
+
+        assert "C" not in listed() and "Space" not in listed()  # Vision: no shapes, no recording
+        app._on_key(pygame.K_2)
+        assert app.scene.name == "geometry" and "C" in listed()
+        assert not app.overlay.visible  # Geometry starts with the Vision overlay hidden
+        assert "L" not in listed()  # landmark numbers only make sense with the overlay on
+        app._on_key(pygame.K_SPACE)  # not recording: ignored, no crash
+        app.keys_overlay.visible = True
+        app.keys_overlay.draw(app.surface, app.hotkeys)
+    finally:
+        pygame.quit()
