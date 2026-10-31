@@ -38,7 +38,11 @@ class PinchDetector:
     def update(self, x: DetectorInput) -> list[GestureEvent]:
         cfg, ratio = self.cfg, x.features.pinch_ratio
         if not self.active:
-            blocked = cfg.block_on_fist and x.gesture == "Closed_Fist"
+            # A closing fist passes through pinch distances before MediaPipe labels it, but its
+            # index finger is already curling; a real pinch keeps the index reaching forward.
+            blocked = (cfg.block_on_fist and x.gesture == "Closed_Fist") or (
+                x.features.index_extension < cfg.min_index_extension
+            )
             self._count = self._count + 1 if ratio < cfg.enter and not blocked else 0
             if self._count >= cfg.min_frames:
                 self.active, self._count = True, 0

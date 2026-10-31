@@ -16,7 +16,7 @@ Built-in camera 0, 10.5 s run, one then two open hands, recording on.
 | Render FPS | 59.5 |
 | Pipeline latency ms (mean / p95) | 31.7 / 40.1 |
 | CPU % | pending |
-| Pinch delay vs Space marks | pending (`right_pinch_x5`) |
+| Pinch delay after the raw threshold crossing | 1–2 frames, all 5 pinches (`right_pinch_x5`); Space marks too imprecise to measure it |
 | False pinch starts / min | pending (`right_static_open`, `fist_palm_cycle`) |
 | Open palm read as 5 fingers | 99 % (right), 100 % (left) of `Open_Palm` frames |
 

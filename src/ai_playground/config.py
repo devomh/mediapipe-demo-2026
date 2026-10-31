@@ -65,6 +65,7 @@ class PinchConfig:
     exit: float
     min_frames: int
     block_on_fist: bool
+    min_index_extension: float
 
 
 @dataclass(frozen=True, slots=True)

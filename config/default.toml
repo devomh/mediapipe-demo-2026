@@ -30,15 +30,18 @@ beta = 10.0
 d_cutoff = 1.0
 
 [tracking.one_euro.world]
-min_cutoff = 1.0
-beta = 40.0
+min_cutoff = 3.0          # lighter than image: pinch_start must fire within 2 frames
+beta = 60.0
 d_cutoff = 1.0
 
 [gestures.pinch]
-enter = 0.25              # pinch_ratio below this starts a pinch...
-exit = 0.40               # ...and above this ends it (hysteresis)
-min_frames = 2            # consecutive frames needed to change state
+# Tuned on tests/fixtures: real closed pinches measure 0.10-0.33, a held pinch drifts up to 0.42
+# while the hand moves, open hands stay above 0.47 (p1).
+enter = 0.35              # pinch_ratio below this starts a pinch...
+exit = 0.50               # ...and above this ends it (hysteresis)
+min_frames = 2            # consecutive frames needed to change state; 1 lets fists through
 block_on_fist = true      # no pinch_start while MediaPipe sees Closed_Fist this frame
+min_index_extension = 0.98  # no pinch_start while the index curls (fist: < 0.95, pinch: >= 1.02)
 
 [gestures.builtin]
 min_score = 0.6

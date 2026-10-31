@@ -16,6 +16,7 @@ def x(ratio=1.0, gesture="None", score=0.0, t=0.0, vel=(0.0, 0.0)):
         palm_center=(0.5, 0.5),
         palm_roll=0.0,
         hand_scale_image=0.2,
+        index_extension=1.2,
     )
     return DetectorInput(
         hand_id=1,

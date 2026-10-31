@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ai_playground.gestures.engine import GestureEngine
+from ai_playground.gestures.features import pinch_ratio
 from ai_playground.sources.replay import load_clip
 from ai_playground.tracking.identity import HandTracker
 
@@ -48,8 +49,14 @@ def test_no_hands(cfg):
 
 
 def test_right_static_open(cfg):
+    """An open, still hand: it enters once and never pinches or fists.
+
+    palm_start/palm_end are expected, since MediaPipe classifies a still open hand as Open_Palm.
+    """
     events, _ = run(cfg, clip_or_skip("right_static_open"))
-    assert [e.type for e in events] == ["hand_enter"]
+    c = count(events)
+    assert c["hand_enter"] == 1
+    assert c["pinch_start"] == 0 and c["fist_start"] == 0
 
 
 def test_right_pinch_x5(cfg):
@@ -58,10 +65,32 @@ def test_right_pinch_x5(cfg):
     c = count(events)
     assert c["pinch_start"] == 5 and c["pinch_end"] == 5
     starts = [e.t for e in events if e.type == "pinch_start"]
+
+    # Space marks are human-timed: sometimes pressed as the fingers touch (just before the
+    # 2-frame confirmation), often well after, even after the release. So they only check
+    # pairing: each mark falls in its own pinch's window, from slightly before it starts until
+    # slightly before the next one starts.
+    early = 0.5
     marks = [m.t for m in clip.marks]
     if len(marks) == 5:
-        # Operator presses Space at the pinch; allow for human reaction time either way.
-        assert all(abs(s - m) < 0.4 for s, m in zip(starts, marks, strict=True))
+        bounds = [*starts[1:], float("inf")]
+        for i, (m, s, nxt) in enumerate(zip(marks, starts, bounds, strict=True)):
+            assert s - early <= m < nxt - early, (
+                f"mark {i + 1} at {m:.2f}s doesn't belong to pinch {i + 1} (starts {s:.2f}s)"
+            )
+
+    # Detection delay (PLAN exit criterion: <= 2 frames), measured against the clip's own raw
+    # landmarks: the frame where the unsmoothed pinch ratio first dropped below `enter`.
+    enter = cfg.gestures.pinch.enter
+    raw = [min((pinch_ratio(h.world) for h in f.hands), default=float("inf")) for f in clip.frames]
+    index = {f.t_capture: i for i, f in enumerate(clip.frames)}
+    for t in starts:
+        k = index[t]
+        j = k
+        while j > 0 and raw[j - 1] < enter:
+            j -= 1
+        assert raw[j] < enter, f"pinch_start at {t:.2f}s without a raw crossing"
+        assert k - j <= 2, f"pinch_start at {t:.2f}s fired {k - j} frames after the raw crossing"
 
 
 def test_right_pinch_hold(cfg):

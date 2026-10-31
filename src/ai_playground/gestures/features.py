@@ -85,12 +85,18 @@ def finger_extended(world: np.ndarray, cfg: FingersConfig) -> tuple[bool, ...]:
         float(np.linalg.norm(world[THUMB_TIP] - world[PINKY_MCP])) / pl if pl > 1e-9 else 0
     )
     flags = [thumb_reach > cfg.thumb_tip_pinky_dist]
-    wrist = world[WRIST]
-    for pip, tip in _PIP_TIP:
-        d_pip = float(np.linalg.norm(world[pip] - wrist))
-        d_tip = float(np.linalg.norm(world[tip] - wrist))
-        flags.append(d_pip > 1e-9 and d_tip / d_pip > cfg.tip_pip_ratio)
+    for finger in range(1, 5):
+        flags.append(finger_extension(world, finger) > cfg.tip_pip_ratio)
     return tuple(flags)
+
+
+def finger_extension(world: np.ndarray, finger: int) -> float:
+    """Tip -> wrist / PIP -> wrist for a non-thumb finger (1..4). ~1.4 straight, < 1 curled."""
+    pip, tip = _PIP_TIP[finger - 1]
+    d_pip = float(np.linalg.norm(world[pip] - world[WRIST]))
+    if d_pip <= 1e-9:
+        return 0.0
+    return float(np.linalg.norm(world[tip] - world[WRIST])) / d_pip
 
 
 def palm_center(landmarks: np.ndarray) -> tuple[float, float]:
@@ -142,6 +148,7 @@ class HandFeatures:
     palm_center: tuple[float, float]
     palm_roll: float
     hand_scale_image: float
+    index_extension: float  # finger_extension of the index; low while curling into a fist
 
 
 def compute(
@@ -157,4 +164,5 @@ def compute(
         palm_center=palm_center(landmarks),
         palm_roll=palm_roll(landmarks, size),
         hand_scale_image=hand_scale_image(landmarks, size),
+        index_extension=finger_extension(world, 1),
     )
