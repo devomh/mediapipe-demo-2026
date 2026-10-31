@@ -10,6 +10,8 @@ from synthetic import make_hand
 
 from ai_playground.gestures import features
 from ai_playground.gestures.engine import GestureEngine, HandState
+from ai_playground.physics.world import KINDS
+from ai_playground.render import text
 from ai_playground.render.background import Background
 from ai_playground.render.viewport import Viewport
 from ai_playground.scenes.base import AppContext
@@ -25,6 +27,7 @@ WINDOW = (1280, 720)
 @pytest.fixture
 def scene(cfg):
     pygame.init()
+    text.reset()  # fonts cached by an earlier test's pygame session are invalid now
     surface = pygame.display.set_mode(WINDOW)
     ctx = AppContext(
         config=cfg,
@@ -76,9 +79,16 @@ def test_lost_hand_drops_without_throwing(scene):
     assert tuple(piece.body.velocity) == (0.0, 0.0)
 
 
+def spread(i):
+    """Pinch positions far apart, so a new pinch never lands on (and grabs) an earlier shape."""
+    return (0.1 + 0.15 * i, 0.3)
+
+
 def test_kinds_cycle_and_hues_differ(scene):
     for i in range(6):
-        scene.handle([ev("pinch_start", i), ev("pinch_end", i + 0.2, reason="released")], [])
+        scene.handle(
+            [ev("pinch_start", i, pos=spread(i)), ev("pinch_end", i + 0.2, reason="released")], []
+        )
     kinds = [p.kind for p in scene.world.pieces]
     assert kinds == ["circle", "bar", "triangle", "square", "pentagon", "circle"]
     hues = [p.hue for p in scene.world.pieces]
@@ -95,11 +105,17 @@ FINGERS = {
 }
 
 
-def state(cfg, hid, fingers=5, pinching=False, handedness="Left"):
-    """A HandState whose features come from a synthetic hand holding up `fingers` fingers."""
-    hand = make_hand(handedness=handedness, center=(0.25, 0.5), **FINGERS[fingers])
+def state(cfg, hid, fingers=5, pinching=False, handedness="Left", center=(0.25, 0.5), palm=None):
+    """A HandState whose features come from a synthetic hand holding up `fingers` fingers.
+
+    `fingers=0` is a fist (fist detector active); `fingers=5` an open palm (palm detector active
+    unless `palm=False`).
+    """
+    if palm is None:
+        palm = fingers == 5 and not pinching
+    hand = make_hand(handedness=handedness, center=center, **FINGERS[fingers])
     f = features.compute(hand.landmarks, hand.world, (640, 480), cfg.gestures.fingers)
-    return HandState(TrackedHand(hid, hand, 10), f, (0.0, 0.0), pinching, fingers == 0, False)
+    return HandState(TrackedHand(hid, hand, 10), f, (0.0, 0.0), pinching, fingers == 0, palm)
 
 
 def hold(scene, cfg, states, frames=None):
@@ -145,7 +161,9 @@ def test_fingers_change_the_shape_being_held(scene, cfg):
 def test_fist_or_no_other_hand_keeps_the_automatic_cycle(scene, cfg):
     hold(scene, cfg, [state(cfg, 2, 0)])  # a fist chooses nothing
     for i in range(3):
-        scene.handle([ev("pinch_start", i), ev("pinch_end", i + 0.2, reason="released")], [])
+        scene.handle(
+            [ev("pinch_start", i, pos=spread(i)), ev("pinch_end", i + 0.2, reason="released")], []
+        )
     assert [p.kind for p in scene.world.pieces] == ["circle", "bar", "triangle"]
 
 
@@ -315,3 +333,252 @@ def test_two_hand_stretch_fixture(scene, cfg):
     # The open left hand chose a pentagon while the right held the shape. On its way into the
     # pinch it read as 2 then 1 finger, which used to turn the shape into a circle.
     assert scene.world.pieces[0].kind == "pentagon"
+
+
+# --- A.3: paddle, grab, clear ---------------------------------------------------------------
+
+
+def palm_px(scene, st):
+    return scene.ctx.viewport.to_px(*st.features.palm_center)
+
+
+def fist_event(type_, st, t, **data):
+    return GestureEvent(type_, st.id, st.handedness, t, st.features.palm_center, data=data)
+
+
+def arm(scene, cfg, states, extra=2):
+    """Hold the given hands (open palms) long enough for them to become paddles."""
+    for _ in range(round(cfg.geometry.paddle_hold_s * 60) + extra):
+        scene.handle([], states)
+        scene.update(1 / 60)
+
+
+def test_open_palm_arms_into_a_paddle_sized_to_the_hand(scene, cfg):
+    open_hand = state(cfg, 1, 5)
+    scene.handle([], [open_hand])
+    assert 1 not in scene.world.hands and scene.play.arming[1][2] == 0.0  # arming, ring fading in
+    arm(scene, cfg, [open_hand])
+    assert scene.play.arming == {}
+    hb = scene.world.hands[1]
+    expected = cfg.geometry.paddle_scale * open_hand.features.hand_scale_image * 960  # dest h
+    assert hb.shape is not None and hb.shape.radius == pytest.approx(expected)
+    assert hb.target == pytest.approx(palm_px(scene, open_hand))
+
+
+def test_pinching_or_shape_making_hands_are_not_paddles(scene, cfg):
+    scene.handle([], [state(cfg, 1, 5, pinching=True)])
+    assert 1 not in scene.world.hands
+    scene.handle([ev("pinch_start", 0.0, hand=2)], [state(cfg, 2, 5)])  # pending shape owner
+    assert 2 not in scene.world.hands
+
+
+def test_paddle_bats_a_shape(scene, cfg):
+    st = state(cfg, 1, 5, center=(0.3, 0.8))
+    x0, y0 = palm_px(scene, st)
+    arm(scene, cfg, [st])
+    piece = scene.world.spawn("square", (x0 + 120, y0), 30)
+    for i in range(30):  # sweep the open hand right through the square
+        st = state(cfg, 1, 5, center=(0.3 + 0.01 * (i + 1), 0.8))
+        scene.handle([], [st])
+        scene.update(1 / 60)
+    assert piece.body.velocity.x > 50 or piece.body.position.x > x0 + 200
+
+
+def test_fist_on_a_shape_grabs_carries_and_throws_it(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.4, 0.5))
+    piece = scene.world.spawn("square", palm_px(scene, fist), 40)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    assert scene.play.held == {1: piece} and scene.play.grabs == 1
+    for i in range(20):  # carry it right
+        fist = state(cfg, 1, 0, center=(0.4 + 0.01 * (i + 1), 0.5))
+        scene.handle([], [fist])
+        scene.update(1 / 60)
+    assert piece.body.position.x > palm_px(scene, state(cfg, 1, 0, center=(0.5, 0.5)))[0] - 60
+    opened = state(cfg, 1, 5, center=(0.6, 0.5))
+    scene.handle([fist_event("fist_end", opened, 1.0, reason="released")], [opened])
+    assert scene.play.held == {} and 1 in scene.play.arming  # open again: arming a paddle
+    assert piece.body.velocity.x > 100  # thrown with the carry velocity
+
+
+def test_fist_away_from_shapes_grabs_nothing(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.2, 0.3))
+    x, y = palm_px(scene, fist)
+    scene.world.spawn("square", (x + 400, y), 30)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    assert scene.play.held == {}
+
+
+def test_grab_picks_the_nearest_shape(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.5, 0.5))
+    x, y = palm_px(scene, fist)
+    scene.world.spawn("circle", (x + 50, y), 30)
+    near = scene.world.spawn("circle", (x - 35, y), 30)  # palm is inside this one
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    assert scene.play.held == {1: near}
+
+
+def test_lost_fist_drops_without_throwing(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.4, 0.5))
+    piece = scene.world.spawn("square", palm_px(scene, fist), 40)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    for i in range(10):
+        fist = state(cfg, 1, 0, center=(0.4 + 0.02 * (i + 1), 0.5))
+        scene.handle([], [fist])
+        scene.update(1 / 60)
+    scene.handle([fist_event("fist_end", fist, 1.0, reason="lost")], [])
+    assert tuple(piece.body.velocity) == (0.0, 0.0)
+    assert 1 not in scene.world.hands  # the hand is gone from the world too
+
+
+def test_both_fists_held_clear_once(scene, cfg):
+    for i in range(5):
+        scene.world.spawn("circle", (200 + 150 * i, 300), 30)
+    fists = [state(cfg, 1, 0, center=(0.3, 0.5)), state(cfg, 2, 0, center=(0.7, 0.5))]
+    steps = round(cfg.geometry.clear_hold_s * 60)
+    for _ in range(steps - 5):
+        scene.handle([], fists)
+        scene.update(1 / 60)
+    assert len(scene.world.pieces) == 5 and 0.9 < scene.play.clear_progress < 1.0
+    for _ in range(10):
+        scene.handle([], fists)
+        scene.update(1 / 60)
+    assert scene.world.pieces == []
+    scene.world.spawn("square", (640, 300), 30)  # keep holding: no second clear
+    for _ in range(2 * steps):
+        scene.handle([], fists)
+        scene.update(1 / 60)
+    assert len(scene.world.pieces) == 1
+
+
+def test_one_fist_or_a_brief_double_fist_does_not_clear(scene, cfg):
+    scene.world.spawn("circle", (640, 300), 30)
+    one = [state(cfg, 1, 0, center=(0.3, 0.5)), state(cfg, 2, 5, center=(0.7, 0.5))]
+    for _ in range(200):
+        scene.handle([], one)
+        scene.update(1 / 60)
+    assert len(scene.world.pieces) == 1 and scene.play.clear_progress == 0.0
+    both = [state(cfg, 1, 0, center=(0.3, 0.5)), state(cfg, 2, 0, center=(0.7, 0.5))]
+    for _ in range(30):
+        scene.handle([], both)
+        scene.update(1 / 60)
+    scene.handle([], one)  # one hand opens: progress resets on the next frame
+    scene.update(1 / 60)
+    assert scene.play.clear_progress == 0.0 and len(scene.world.pieces) == 1
+
+
+def test_hand_leaving_releases_its_shape(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.4, 0.5))
+    piece = scene.world.spawn("square", palm_px(scene, fist), 40)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    scene.handle([], [])  # tracker dropped it without a fist_end (e.g. straight to exit)
+    assert scene.play.held == {} and scene.world.hands == {}
+    assert piece in scene.world.pieces and len(scene.world.space.constraints) == 0
+
+
+def test_hands_draw(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.4, 0.5))
+    scene.world.spawn("square", palm_px(scene, fist), 40)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist, state(cfg, 2, 5, center=(0.7, 0.5))])
+    scene.handle([], [fist, state(cfg, 2, 0, center=(0.7, 0.5))])
+    for _ in range(10):
+        scene.update(1 / 60)
+        scene.draw(scene.surface)
+
+
+def test_throw_uses_the_peak_velocity_before_the_late_fist_end(scene, cfg):
+    """The hand swings fast, then slows while opening; fist_end only arrives after that."""
+    fist = state(cfg, 1, 0, center=(0.2, 0.5))
+    piece = scene.world.spawn("circle", palm_px(scene, fist), 30)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    x = 0.2
+    for dx in [0.03] * 12 + [0.003] * 5:  # fast swing, then ~85 ms nearly still (opening)
+        x += dx
+        fist = state(cfg, 1, 0, center=(x, 0.5))
+        scene.handle([], [fist])
+        scene.update(1 / 60)
+    slow = piece.body.velocity.x
+    opened = state(cfg, 1, 5, center=(x, 0.5))
+    scene.handle([fist_event("fist_end", opened, 1.0, reason="released")], [opened])
+    assert piece.body.velocity.x > 2 * slow  # the swing speed, not the slowed-down one
+
+
+def test_grab_and_throw_fixture(scene, cfg):
+    """Clip: pinch to make a shape and drop it, grab it with a fist, carry it, throw it."""
+    path = FIXTURES / "grab_and_throw.jsonl.gz"
+    if not path.exists():
+        pytest.skip("fixture grab_and_throw not recorded")
+    # The clip is cropped from a longer session where this was the second shape, so the
+    # automatic cycle made it a bar; the grab aims at the bar's end. A crop can't carry that
+    # scene state, so start the cycle where it was.
+    scene._next_kind = KINDS.index("bar")
+    _replay(scene, cfg, load_clip(path))
+    assert scene.play.grabs >= 1, "the fist never grabbed the shape"
+    assert scene.play.throws, "the grabbed shape was never released"
+    # A real throw, not a drop: at least 1 window height per second.
+    assert max(scene.play.throws) > WINDOW[1]
+
+
+def test_paddle_needs_mediapipe_open_palm_not_just_five_fingers(scene, cfg):
+    """Right after a pinch, the half-open hand already counts 5 fingers; that's not a paddle."""
+    arm(scene, cfg, [state(cfg, 1, 5, palm=False)])
+    assert 1 not in scene.world.hands and scene.play.arming == {}
+    arm(scene, cfg, [state(cfg, 1, 5, palm=True)])
+    assert scene.world.hands[1].shape is not None
+
+
+def test_no_paddle_right_after_the_hand_ends_a_pinch(scene, cfg):
+    """The released shape appears at the hand; a paddle there would bat it away."""
+    scene.handle([ev("pinch_start", 0.0, hand=1)], [state(cfg, 1, 5, pinching=True)])
+    scene.handle([ev("pinch_end", 0.5, hand=1, reason="released")], [state(cfg, 1, 5)])
+    assert 1 not in scene.world.hands
+    for _ in range(round(cfg.geometry.paddle_after_pinch_s * 60) - 2):
+        scene.update(1 / 60)
+        scene.handle([], [state(cfg, 1, 5)])
+    assert 1 not in scene.world.hands and scene.play.arming == {}  # not even arming yet
+    arm(scene, cfg, [state(cfg, 1, 5)], extra=6)
+    assert scene.world.hands[1].shape is not None
+
+
+def test_pinch_on_a_shape_grabs_it_instead_of_making_one(scene, cfg):
+    pos = (0.5, 0.4)
+    piece = scene.world.spawn("square", scene.ctx.viewport.to_px(*pos), 50)
+    pinching = state(cfg, 1, 5, pinching=True, center=(0.5, 0.5))
+    scene.handle([ev("pinch_start", 0.0, pos=pos)], [pinching])
+    assert scene.pending == {} and scene.play.held == {1: piece}
+    for i in range(15):  # carry it right by the pinch point
+        p = (pos[0] + 0.01 * (i + 1), pos[1])
+        moved = replace(pinching, features=replace(pinching.features, pinch_point=p))
+        scene.handle([ev("pinch_move", 0.1 * i, pos=p)], [moved])
+        scene.update(1 / 60)
+    scene.handle([ev("pinch_end", 2.0, pos=p, reason="released")], [state(cfg, 1, 5, palm=False)])
+    assert scene.play.held == {} and len(scene.world.pieces) == 1  # no new shape was made
+    assert piece.body.velocity.x > 100 and scene.play.throws  # thrown by the pinch release
+
+
+def test_pinch_near_but_outside_reach_still_makes_a_shape(scene, cfg):
+    h = WINDOW[1]
+    x, y = scene.ctx.viewport.to_px(0.5, 0.4)
+    scene.world.spawn("circle", (x, y), 40)
+    far = scene.ctx.viewport.to_norm(x + 40 + (cfg.geometry.pinch_grab_reach + 0.02) * h, y)
+    scene.handle([ev("pinch_start", 0.0, pos=far)], [])
+    assert 1 in scene.pending and scene.play.held == {}
+
+
+def test_stretch_takes_priority_over_pinch_grab(scene, cfg):
+    """While one hand holds a new shape, the other hand's pinch stretches it, even on a shape."""
+    other = scene.world.spawn("square", scene.ctx.viewport.to_px(0.7, 0.4), 50)
+    scene.handle([ev("pinch_start", 0.0, hand=1, pos=(0.3, 0.4))], [])
+    scene.handle([ev("pinch_start", 0.1, hand=2, pos=(0.7, 0.4))], [])
+    assert scene.pending[1].partner == 2 and scene.play.held == {}
+    assert other in scene.world.pieces
+
+
+def test_closing_the_palm_restarts_paddle_arming(scene, cfg):
+    open_hand = state(cfg, 1, 5)
+    for _ in range(round(cfg.geometry.paddle_hold_s * 60) - 4):
+        scene.handle([], [open_hand])
+        scene.update(1 / 60)
+    scene.handle([], [state(cfg, 1, 0)])  # a fist in between
+    scene.update(1 / 60)
+    scene.handle([], [open_hand])
+    assert scene.play.arming[1][2] < 0.1  # starts over

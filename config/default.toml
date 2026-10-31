@@ -78,6 +78,7 @@ fade_s = 0.5
 sleep_time_s = 0.5        # resting bodies stop being simulated
 max_speed = 4.0           # throw speed cap in window heights/s (no tunnelling through walls)
 max_rise = 1.0            # a throw rises at most this many window heights, so it comes back fast
+hand_follow_s = 0.033     # hand bodies reach the tracked palm over this (~1 camera frame)
 
 [geometry]
 min_size = 0.03           # shape radius when a pinch starts, in window heights...
@@ -90,3 +91,15 @@ choose_min_pinch_ratio = 0.73  # ignore a hand closing in on a pinch (deliberate
                                # a hand on its way into a pinch <= 0.70, measured on fixtures)
 stretch_max_size = 0.3    # two-hand stretch: largest radius, in window heights
 stretch_gain = 0.5        # radius = this x half the pinch distance (hands are ~0.7-1.3 apart)
+paddle_scale = 1.0        # open-hand paddle radius = this x the hand's palm length on screen
+paddle_after_pinch_s = 0.4  # no paddle this soon after the hand ends a pinch (MediaPipe's
+                            # Open_Palm can return within 0.0-0.06 s, before the shape falls clear)
+grab_reach = 0.09         # a fist grabs a shape whose edge is within this, in window heights
+                          # (a natural fist grab in recordings/grab_attempts landed at 0.064)
+pinch_grab_reach = 0.06   # a pinch this close to a shape (or inside it) grabs it instead of
+                          # making a new one: natural grabs look like pinches. Claw grab: 0.039;
+                          # deliberate creation pinches: >= 0.35 from any shape (fixtures)
+paddle_hold_s = 0.4       # hold an open palm this long before it becomes a paddle
+clear_hold_s = 1.5        # hold both fists this long to clear all shapes
+throw_lookback_s = 0.15   # opening a fist throws with the fastest velocity from this window:
+                          # fist_end lands 70-130 ms after the fingers open (fist_palm_cycle)

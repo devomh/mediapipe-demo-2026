@@ -42,23 +42,26 @@ def piece_points(piece: Piece) -> list[tuple[float, float]]:
     return [tuple(body.local_to_world(v)) for v in piece.shape.get_vertices()]
 
 
-def draw_piece(surface: pygame.Surface, piece: Piece, bg=(10, 12, 18)) -> None:
+def draw_piece(
+    surface: pygame.Surface, piece: Piece, bg=(10, 12, 18), highlight: bool = False
+) -> None:
     color = PALETTE[piece.hue]
     a = piece.alpha
-    fill, edge = fade_to(color, bg, a), fade_to(lighten(color), bg, a)
+    fill, edge = fade_to(color, bg, a), fade_to(lighten(color, 0.8 if highlight else 0.45), bg, a)
+    width = 5 if highlight else 3
     pos = piece.body.position
     if piece.kind == "circle":
         c = (round(pos.x), round(pos.y))
         r = round(piece.radius)
         pygame.draw.circle(surface, fill, c, r)
-        pygame.draw.circle(surface, edge, c, r, 3)
+        pygame.draw.circle(surface, edge, c, r, width)
         # A spoke, so rolling is visible.
         tip = piece.body.local_to_world((piece.radius * 0.7, 0))
         pygame.draw.line(surface, edge, c, (round(tip.x), round(tip.y)), 3)
     else:
         pts = piece_points(piece)
         pygame.draw.polygon(surface, fill, pts)
-        pygame.draw.polygon(surface, edge, pts, 3)
+        pygame.draw.polygon(surface, edge, pts, width)
 
 
 def _rotated(kind: str, radius: float, angle: float, cx: float, cy: float):
@@ -132,6 +135,43 @@ def draw_palette(surface: pygame.Surface, selected: str, chosen: bool) -> None:
         else:
             r = icon * (1.0 if kind == "bar" else 1.1)
             pygame.draw.polygon(surface, color, _rotated(kind, r, 0.0, cx, cy))
+
+
+HAND_COLOR = (220, 235, 255)
+
+
+def draw_paddle(
+    surface: pygame.Surface, pos: tuple[float, float], radius: float, strength: float = 1.0
+) -> None:
+    """Soft ring where the open hand pushes shapes; fades in (`strength` < 1) while arming."""
+    size = round(radius * 2 + 6)
+    layer = pygame.Surface((size, size), pygame.SRCALPHA)
+    c = size / 2
+    k = max(0.0, min(1.0, strength))
+    pygame.draw.circle(layer, (*HAND_COLOR, round(28 * k)), (c, c), radius)
+    pygame.draw.circle(layer, (*HAND_COLOR, round(110 * k)), (c, c), radius, 2)
+    surface.blit(layer, (round(pos[0] - c), round(pos[1] - c)))
+
+
+def draw_grab_ring(surface: pygame.Surface, pos: tuple[float, float], t: float) -> None:
+    """A fist holding a shape: a small ring that turns."""
+    center = (round(pos[0]), round(pos[1]))
+    r = 16
+    start = (t * 4.0) % (2 * math.pi)
+    rect = pygame.Rect(center[0] - r, center[1] - r, 2 * r, 2 * r)
+    pygame.draw.circle(surface, (40, 44, 60), center, r + 3)
+    pygame.draw.arc(surface, HAND_COLOR, rect, start, start + 4.2, 4)
+
+
+def draw_progress_ring(surface: pygame.Surface, pos: tuple[float, float], frac: float) -> None:
+    """Fills clockwise from the top while both fists are held (two-fist clear)."""
+    center = (round(pos[0]), round(pos[1]))
+    r = 44
+    rect = pygame.Rect(center[0] - r, center[1] - r, 2 * r, 2 * r)
+    pygame.draw.circle(surface, (60, 64, 80), center, r, 4)
+    if frac > 0:
+        end = math.pi / 2
+        pygame.draw.arc(surface, (255, 120, 90), rect, end - 2 * math.pi * frac, end, 7)
 
 
 class Sparkles:

@@ -4,7 +4,10 @@
 - A.2: the other hand holds up 1-5 fingers to choose the shape (next or current pinch);
   a second pinch while one hand holds a shape stretches it between both pinch points.
 
-Paddle, grab, clear gesture (A.3) and glow/particles (A.4) come later.
+- A.3: open palm = paddle, fist or pinch on a shape = grab and throw, both fists = clear
+  (scenes/geometry_hands.py).
+
+Glow and particles (A.4) come later.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from ai_playground.gestures.engine import HandState
 from ai_playground.physics.world import KINDS, World
 from ai_playground.render import effects
 from ai_playground.scenes.base import AppContext
+from ai_playground.scenes.geometry_hands import HandPlay
 from ai_playground.types import GestureEvent
 
 
@@ -87,6 +91,7 @@ class GeometryScene:
         self._hands: Sequence[HandState] = ()
         self._pinch: dict[int, tuple[tuple[float, float], tuple[float, float]]] = {}  # pos px, vel
         self._owner: dict[int, int] = {}  # stretching hand -> hand that owns the shape
+        self.play: HandPlay | None = None
 
     # --- lifecycle ----------------------------------------------------------------------
     def enter(self, ctx: AppContext) -> None:
@@ -94,19 +99,39 @@ class GeometryScene:
         self.world = World(ctx.viewport.window_size, ctx.config.physics)
         g = ctx.config.geometry
         self.chooser = FingerChooser(g.choose_frames, g.choose_min_pinch_ratio)
+        self.play = HandPlay(
+            self.world,
+            ctx.viewport,
+            g,
+            busy=lambda hid: hid in self.pending or hid in self._owner,
+            on_clear=self._burst,
+        )
         ctx.background.mode = "dim"
         ctx.background.dim_brightness = ctx.config.geometry.background_brightness
 
     def exit(self) -> None:
         self.clear()
+        if self.play is not None:
+            self.play.reset()
         self.world = None
+        self.play = None
         self.ctx = None
 
     def clear(self) -> None:
         self.pending.clear()
         self._owner.clear()
+        if self.play is not None:
+            self.play.grabbed.clear()
         if self.world is not None:
             self.world.clear()
+
+    def _burst(self) -> None:
+        """Two-fist clear: every shape bursts (sparkles until A.4's particles)."""
+        assert self.world is not None
+        for piece in self.world.pieces:
+            pos = piece.body.position
+            self.sparkles.add((pos.x, pos.y), piece.hue)
+        self.clear()
 
     # --- helpers ------------------------------------------------------------------------
     def _px(self, pos: tuple[float, float]) -> tuple[float, float]:
@@ -189,6 +214,10 @@ class GeometryScene:
                     self._owner[hid] = owner
                     self._stretch(self.pending[owner], owner)
                     continue
+                # A pinch on an existing shape grabs it; in empty space it makes a new one.
+                assert self.play is not None
+                if self.play.try_grab(hid, self._pinch[hid][0], "pinch"):
+                    continue
                 kind = self.chosen_kind(maker=hid)
                 chosen = kind is not None
                 if kind is None:
@@ -222,12 +251,17 @@ class GeometryScene:
                 if kind is not None and kind != p.kind:
                     p.kind, p.chosen = kind, True
 
+        assert self.play is not None
+        self.play.handle(events, hands)
+
     # --- frame --------------------------------------------------------------------------
     def update(self, dt: float) -> None:
         assert self.ctx is not None and self.world is not None
         self._t += dt
         if self.world.size != self.ctx.viewport.window_size:
             self.world.resize(self.ctx.viewport.window_size)
+        assert self.play is not None
+        self.play.update(dt)
         self.world.step(dt)
         self.sparkles.update(dt)
 
@@ -235,8 +269,21 @@ class GeometryScene:
         assert self.ctx is not None and self.world is not None
         frame = self.ctx.frame
         self.ctx.background.draw(surface, self.ctx.viewport, frame.image if frame else None)
+        assert self.play is not None
+        held = {id(p) for p in self.play.held.values()}
         for piece in self.world.pieces:
-            effects.draw_piece(surface, piece)
+            effects.draw_piece(surface, piece, highlight=id(piece) in held)
+        for hid, hb in self.world.hands.items():
+            pos = (hb.body.position.x, hb.body.position.y)
+            if hb.shape is not None:
+                effects.draw_paddle(surface, pos, hb.shape.radius)
+            elif hid in self.play.held:
+                effects.draw_grab_ring(surface, pos, self._t)
+        for pos, radius, frac in self.play.arming.values():
+            effects.draw_paddle(surface, pos, radius, strength=frac)
+        if self.play.clear_progress > 0:
+            for pos in self.play.fist_pos.values():
+                effects.draw_progress_ring(surface, pos, self.play.clear_progress)
         for owner, p in self.pending.items():
             if p.partner is not None and owner in self._pinch and p.partner in self._pinch:
                 effects.draw_stretch_line(

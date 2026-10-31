@@ -32,8 +32,23 @@ Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
 | **Two-hand pinch** (second hand pinches while the first holds a shape) | **Stretch:** the shape spans between the two pinch points. Size = distance, rotation = angle | Both pinch points connected by a glowing line |
 | **Open hand** (not pinching, not fist) | The hand is a **kinematic paddle** (circle at palm centre, radius ∝ hand size) that pushes and bats shapes | Soft ring cursor |
 | **Fist near a shape** | **Grab:** shape attaches to the hand via a pivot joint. Opening the hand releases or throws it | Shape outline brightens, grab ring |
+| **Pinch on a shape** *(added in A.3)* | **Grab** by the pinch point; releasing the pinch drops or throws it. A pinch in empty space still creates a shape | Same as fist grab |
 | **Both fists held 1.5 s** | **Clear:** every shape bursts into particles | Progress ring around both fists |
 | **Custom gesture** (from Train scene) | Triggers its slot's effect (§5.6) | Slot icon flashes |
+
+*Changed in A.3, from live testing and `recordings/grab_attempts`:*
+- **Natural grabs look like pinches.** A visitor grabbing a shape curls the fingers with the
+  thumb on the index, which is geometrically a pinch (MediaPipe labelled it `None`, not
+  `Closed_Fist`). No hand-shape rule separates the two, because deliberate pinches are also made
+  with curled fingers (`two_hand_stretch`). What is under the hand does: a pinch within
+  `pinch_grab_reach` (0.06 window heights) of a shape grabs it. Claw grab measured 0.039;
+  deliberate creation pinches started ≥ 0.35 from any shape. Stretch takes priority.
+- **The paddle needs a deliberately open hand held for 0.4 s** (MediaPipe's debounced
+  `Open_Palm`, ring fading in while it arms), and not within 0.4 s of ending a pinch. "Not
+  pinching, not fist" made every half-open hand a paddle, including right after a pinch, where
+  it batted away the new shape. Pinch, release, and grab stay instant: creating and throwing
+  depend on timing, and the unwanted activations in the recording lasted > 1 s anyway.
+- Fist reach is 0.09 window heights (a natural fist grab landed at 0.064).
 
 ## 3. Physics (`physics/world.py`)
 
@@ -52,6 +67,11 @@ Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
 - **Hand bodies:** kinematic bodies whose velocity is set each frame from tracked motion
   (`(target − pos) / dt`), so collisions transfer momentum correctly. They are removed when the
   hand leaves or changes state.
+  *Added in A.3:* `dt` is at least `hand_follow_s` (one camera frame), so motion stays smooth
+  between 30 FPS camera updates at 60 FPS rendering. A grabbed piece is **thrown with the fastest
+  velocity from the last 0.15 s**: `fist_end` arrives 70–130 ms after the fingers start to open
+  (MediaPipe label lag plus debounce, measured on `fist_palm_cycle`), when a throwing hand is
+  already slowing down.
 - A collision handler records **impacts** (impulse magnitude, position, both shapes) into a
   per-step list. Phase A uses it for sparks; Phase C turns it into sound.
 

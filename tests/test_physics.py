@@ -126,3 +126,89 @@ def test_shape_vertices(kind, n):
         assert all(math.hypot(x, y) == pytest.approx(40) for x, y in v)
     if kind == "square":
         assert sorted({round(y, 6) for _, y in v}) == pytest.approx([-28.284271, 28.284271])
+
+
+# --- hands -------------------------------------------------------------------------------
+
+
+def test_hand_body_follows_its_target(world):
+    world.set_hand(1, (200, 300), radius=40)
+    for i in range(1, 31):  # hand moving right at 300 px/s, camera updates at 30 FPS
+        if i % 2 == 0:
+            world.set_hand(1, (200 + 10 * i, 300), radius=40)
+        world.step(1 / 60)
+    x, y = world.hands[1].body.position
+    # It trails the moving hand by about one camera frame (50 ms at 300 px/s = 15 px), by design.
+    assert 500 - 15 <= x <= 500 and y == pytest.approx(300, abs=1)
+
+
+def test_paddle_transfers_momentum_and_wakes_sleeping_pieces(world, cfg):
+    p = world.spawn("square", (640, 650), 30)
+    run(world, 2.0)  # settles on the floor
+    assert p.body.is_sleeping
+    world.set_hand(1, (400, 650), radius=40)
+    world.step(1 / 60)
+    for i in range(30):  # sweep right through the square
+        world.set_hand(1, (400 + 20 * (i + 1), 650), radius=40)
+        world.step(1 / 60)
+    assert p.body.position.x > 700  # batted away
+    assert not p.body.is_sleeping
+
+
+def test_paddle_radius_follows_the_hand_and_switching_to_anchor_rebuilds(world):
+    hb = world.set_hand(1, (300, 300), radius=40)
+    assert world.set_hand(1, (300, 300), radius=60).shape.radius == pytest.approx(60)
+    anchor = world.set_hand(1, (300, 300))  # fist: no shape
+    assert anchor.shape is None and anchor is not hb
+    assert hb.body not in world.space.bodies
+
+
+def test_grab_carries_the_piece_and_release_throws_it(world):
+    p = world.spawn("square", (640, 400), 30)
+    world.set_hand(1, (640, 400))
+    world.grab(1, p, (640, 400))
+    for i in range(30):  # carry it up and to the right
+        world.set_hand(1, (640 + 10 * (i + 1), 400 - 5 * (i + 1)))
+        world.step(1 / 60)
+    assert p.body.position.x == pytest.approx(940, abs=25)
+    assert p.body.position.y == pytest.approx(250, abs=25)  # held up against gravity
+    thrown = world.release(1)
+    assert thrown is p and world.hands[1].joint is None
+    assert p.body.velocity.x > 300  # keeps the carry velocity
+
+
+def test_release_without_throw_stops_the_piece(world):
+    p = world.spawn("circle", (640, 400), 30)
+    world.set_hand(1, (640, 400))
+    world.grab(1, p, (640, 400))
+    for i in range(10):
+        world.set_hand(1, (640 + 20 * (i + 1), 400))
+        world.step(1 / 60)
+    world.release(1, throw=False)
+    assert tuple(p.body.velocity) == (0.0, 0.0)
+
+
+def test_removing_a_held_piece_or_its_hand_cleans_up_the_joint(world, cfg):
+    p = world.spawn("square", (640, 400), 30)
+    world.set_hand(1, (640, 400))
+    world.grab(1, p, (640, 400))
+    world.remove(p)
+    assert world.hands[1].joint is None and len(world.space.constraints) == 0
+    q = world.spawn("square", (640, 400), 30)
+    world.grab(1, q, (640, 400))
+    world.remove_hand(1)
+    assert len(world.space.constraints) == 0 and 1 not in world.hands
+    run(world, 0.5)
+    assert q.body.position.y > 400  # falls once let go
+
+
+def test_hand_bodies_do_not_count_as_pieces_in_impacts(world):
+    world.spawn("circle", (640, 600), 30)
+    world.set_hand(1, (500, 600), radius=40)
+    hits = []
+    for i in range(20):
+        world.set_hand(1, (500 + 15 * (i + 1), 600), radius=40)
+        world.step(1 / 60)
+        hits += world.impacts
+    assert hits and all(len(world.pieces) == 1 for _ in hits)
+    assert all(h.pieces[0] is not None or h.pieces[1] is not None for h in hits)

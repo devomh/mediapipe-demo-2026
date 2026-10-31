@@ -122,6 +122,7 @@ class PhysicsConfig:
     sleep_time_s: float
     max_speed: float
     max_rise: float
+    hand_follow_s: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +136,13 @@ class GeometryConfig:
     choose_min_pinch_ratio: float
     stretch_max_size: float
     stretch_gain: float
+    paddle_scale: float
+    paddle_after_pinch_s: float
+    grab_reach: float
+    pinch_grab_reach: float
+    paddle_hold_s: float
+    clear_hold_s: float
+    throw_lookback_s: float
 
 
 @dataclass(frozen=True, slots=True)

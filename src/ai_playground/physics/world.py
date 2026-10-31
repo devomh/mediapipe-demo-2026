@@ -14,6 +14,7 @@ KINDS = ("circle", "bar", "triangle", "square", "pentagon")
 _DENSITY = {"circle": 1.0, "bar": 1.4, "triangle": 1.0, "square": 1.1, "pentagon": 1.1}
 _WALL = 1  # collision types
 _PIECE = 2
+_HAND = 3
 
 
 def shape_vertices(kind: str, radius: float) -> list[tuple[float, float]]:
@@ -49,6 +50,21 @@ class Piece:
     _fade_s: float = 0.5
 
 
+@dataclass(eq=False, slots=True)
+class HandBody:
+    """A hand in the physics world: a kinematic body steered toward the tracked palm.
+
+    With a shape it is a paddle that pushes and bats pieces; without one it is an invisible
+    anchor that a grabbed piece hangs from.
+    """
+
+    body: pymunk.Body
+    shape: pymunk.Circle | None
+    target: tuple[float, float]
+    joint: pymunk.Constraint | None = None
+    held: Piece | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class Impact:
     impulse: float
@@ -70,6 +86,7 @@ class World:
         self._walls: list[pymunk.Segment] = []
         self._acc = 0.0
         self._by_shape: dict[pymunk.Shape, Piece] = {}
+        self.hands: dict[int, HandBody] = {}
         self.resize(self.size)
 
     @property
@@ -147,6 +164,9 @@ class World:
         return (vx, max(vy, -max_up))  # y is down, so rising is negative
 
     def remove(self, piece: Piece) -> None:
+        for hb in self.hands.values():
+            if hb.held is piece:
+                self._unhook(hb)
         self.space.remove(piece.body, piece.shape)
         self._by_shape.pop(piece.shape, None)
         self.pieces.remove(piece)
@@ -155,10 +175,90 @@ class World:
         for p in list(self.pieces):
             self.remove(p)
 
+    # --- hands --------------------------------------------------------------------------
+    def set_hand(
+        self, hand_id: int, pos: tuple[float, float], radius: float | None = None
+    ) -> HandBody:
+        """Steer a hand body toward `pos`; `radius` makes it a paddle, None an anchor."""
+        hb = self.hands.get(hand_id)
+        if hb is not None and (hb.shape is None) != (radius is None):
+            self.remove_hand(hand_id)  # paddle <-> anchor: start over
+            hb = None
+        if hb is None:
+            body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+            body.position = pos
+            shape = None
+            if radius is not None:
+                shape = pymunk.Circle(body, radius)
+                shape.elasticity, shape.friction = self.cfg.elasticity, self.cfg.friction
+                shape.collision_type = _HAND
+                self.space.add(body, shape)
+            else:
+                self.space.add(body)
+            hb = self.hands[hand_id] = HandBody(body, shape, pos)
+        else:
+            hb.target = pos
+            if hb.shape is not None and abs(hb.shape.radius - radius) > 0.5:
+                hb.shape.unsafe_set_radius(radius)
+        return hb
+
+    def remove_hand(self, hand_id: int) -> None:
+        hb = self.hands.pop(hand_id, None)
+        if hb is None:
+            return
+        self._unhook(hb)
+        self.space.remove(*[x for x in (hb.body, hb.shape) if x is not None])
+
+    def grab(self, hand_id: int, piece: Piece, point: tuple[float, float]) -> None:
+        """Hang `piece` from the hand's anchor at world `point`; it can still swing."""
+        hb = self.hands[hand_id]
+        self._unhook(hb)
+        joint = pymunk.PivotJoint(hb.body, piece.body, point)
+        # Finite force: a piece pinned against a wall or the pile slips instead of exploding.
+        joint.max_force = piece.body.mass * self.space.gravity.y * 60
+        self.space.add(joint)
+        hb.joint, hb.held = joint, piece
+        piece.body.activate()
+
+    def release(
+        self, hand_id: int, throw: bool = True, velocity: tuple[float, float] | None = None
+    ) -> Piece | None:
+        """Let go of the held piece: thrown with `velocity` (default: its own), capped; or
+        stopped if not thrown."""
+        hb = self.hands.get(hand_id)
+        if hb is None or hb.held is None:
+            return None
+        piece = hb.held
+        self._unhook(hb)
+        if piece in self.pieces:
+            v = velocity if velocity is not None else tuple(piece.body.velocity)
+            piece.body.velocity = self.limit_throw(v) if throw else (0.0, 0.0)
+        return piece
+
+    def _unhook(self, hb: HandBody) -> None:
+        if hb.joint is not None:
+            self.space.remove(hb.joint)
+        hb.joint, hb.held = None, None
+
+    def _steer_hands(self, dt: float) -> None:
+        # Velocity, not position: collisions then transfer the hand's momentum. Reaching the
+        # target over `hand_follow_s` (about one camera frame) keeps motion continuous between
+        # 30 FPS camera updates at 60 FPS rendering.
+        follow = max(dt, self.cfg.hand_follow_s)
+        cap = self.cfg.max_speed * self.size[1]
+        for hb in self.hands.values():
+            x, y = hb.body.position
+            vx, vy = (hb.target[0] - x) / follow, (hb.target[1] - y) / follow
+            speed = math.hypot(vx, vy)
+            if speed > cap:
+                vx, vy = vx * cap / speed, vy * cap / speed
+            hb.body.velocity = (vx, vy)
+
     # --- simulation ---------------------------------------------------------------------
     def step(self, dt: float) -> int:
         """Advance by `dt` in fixed steps; returns the number of substeps run."""
         self.impacts = []
+        self._steer_hands(dt)
         ts, n = self.timestep, 0
         self._acc = min(self._acc + dt, self.cfg.max_substeps * ts)
         while self._acc >= ts - 1e-9 and n < self.cfg.max_substeps:
