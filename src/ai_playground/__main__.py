@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         except CameraError as e:
             camera_error = str(e)
         if camera_error is None:
-            source = LiveSource(camera, Recognizer(cfg.recognizer, cfg.model_path()))
+            source = LiveSource(camera, lambda: Recognizer(cfg.recognizer, cfg.model_path()))
         label = f"LIVE cam {camera.index}"
         hint = (
             f"Camera {camera.index} opened but sent no frames within "

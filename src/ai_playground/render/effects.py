@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import random
 
 import pygame
 
-from ai_playground.physics.world import Piece, shape_vertices
+from ai_playground.physics.world import KINDS, Piece, shape_vertices
+from ai_playground.render import text
 
 # 8 saturated hues that read well on a dark background.
 PALETTE = (
@@ -59,10 +61,22 @@ def draw_piece(surface: pygame.Surface, piece: Piece, bg=(10, 12, 18)) -> None:
         pygame.draw.polygon(surface, edge, pts, 3)
 
 
+def _rotated(kind: str, radius: float, angle: float, cx: float, cy: float):
+    ca, sa = math.cos(angle), math.sin(angle)
+    return [(cx + x * ca - y * sa, cy + x * sa + y * ca) for x, y in shape_vertices(kind, radius)]
+
+
 def draw_preview(
-    surface: pygame.Surface, kind: str, pos: tuple[float, float], radius: float, hue: int, t: float
+    surface: pygame.Surface,
+    kind: str,
+    pos: tuple[float, float],
+    radius: float,
+    hue: int,
+    t: float,
+    angle: float = 0.0,
+    ring: bool = True,
 ) -> None:
-    """Pulsing translucent shape plus a size ring, while a pinch is held."""
+    """Pulsing translucent shape plus a size ring (off while stretching), while a pinch is held."""
     color = PALETTE[hue]
     pulse = 0.5 + 0.5 * abs(((t * 2.0) % 2.0) - 1.0)  # triangle wave, 1 Hz
     size = round(radius * 2 + 8)
@@ -72,12 +86,52 @@ def draw_preview(
     if kind == "circle":
         pygame.draw.circle(layer, (*color, alpha), (c, c), radius)
     else:
-        pts = [(c + x, c + y) for x, y in shape_vertices(kind, radius)]
-        pygame.draw.polygon(layer, (*color, alpha), pts)
+        pygame.draw.polygon(layer, (*color, alpha), _rotated(kind, radius, angle, c, c))
     surface.blit(layer, (round(pos[0] - c), round(pos[1] - c)))
-    pygame.draw.circle(
-        surface, lighten(color, 0.6), (round(pos[0]), round(pos[1])), round(radius + 6), 2
-    )
+    if ring:
+        center = (round(pos[0]), round(pos[1]))
+        pygame.draw.circle(surface, lighten(color, 0.6), center, round(radius + 6), 2)
+
+
+def draw_stretch_line(
+    surface: pygame.Surface, a: tuple[float, float], b: tuple[float, float], hue: int
+) -> None:
+    """The glowing link between two pinch points while a shape is stretched."""
+    color = PALETTE[hue]
+    pygame.draw.line(surface, fade_to(color, (10, 12, 18), 0.4), a, b, 9)
+    pygame.draw.line(surface, lighten(color, 0.7), a, b, 3)
+    for p in (a, b):
+        pygame.draw.circle(surface, lighten(color, 0.7), (round(p[0]), round(p[1])), 7)
+
+
+def draw_palette(surface: pygame.Surface, selected: str, chosen: bool) -> None:
+    """Shape palette on the right edge: finger count -> shape, with the current selection lit.
+
+    `chosen` means the other hand picked it; otherwise it's the automatic cycle's "next".
+    """
+    cell, icon = 58, 17
+    w, h = 82, cell * len(KINDS) + 34
+    x = surface.get_width() - w - 8
+    y = (surface.get_height() - h) // 2
+    panel = pygame.Surface((w, h), pygame.SRCALPHA)
+    panel.fill((0, 0, 0, 120))
+    surface.blit(panel, (x, y))
+    label = "chosen" if chosen else "next"
+    text.draw(surface, label, (x + w // 2, y + 8), (90, 220, 255), 13, anchor="midtop")
+    for i, kind in enumerate(KINDS):
+        cx, cy = x + w // 2 + 8, y + 34 + cell * i + cell // 2
+        lit = kind == selected
+        color = (255, 255, 255) if lit else (120, 120, 130)
+        if lit:
+            pygame.draw.rect(
+                surface, (90, 220, 255), (x + 4, cy - cell // 2 + 3, w - 8, cell - 6), 2, 6
+            )
+        text.draw(surface, str(i + 1), (x + 12, cy), color, 16, bold=True, anchor="midleft")
+        if kind == "circle":
+            pygame.draw.circle(surface, color, (cx, cy), icon)
+        else:
+            r = icon * (1.0 if kind == "bar" else 1.1)
+            pygame.draw.polygon(surface, color, _rotated(kind, r, 0.0, cx, cy))
 
 
 class Sparkles:

@@ -131,6 +131,10 @@ class GeometryConfig:
     inflate_s: float
     throw_gain: float
     background_brightness: float
+    choose_frames: int
+    choose_min_pinch_ratio: float
+    stretch_max_size: float
+    stretch_gain: float
 
 
 @dataclass(frozen=True, slots=True)
