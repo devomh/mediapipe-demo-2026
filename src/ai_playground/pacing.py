@@ -10,24 +10,34 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Callable
 
 
 class FramePacer:
-    def __init__(self, fps: float, spin_s: float = 0.0015) -> None:
+    """`clock` and `sleep` are injectable so tests can run on a fake clock."""
+
+    def __init__(
+        self,
+        fps: float,
+        spin_s: float = 0.0015,
+        clock: Callable[[], float] = time.perf_counter,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self.period = 1.0 / fps
         self.spin_s = spin_s
-        self._next = time.perf_counter() + self.period
-        self._last = time.perf_counter()
+        self._clock, self._sleep = clock, sleep
+        self._next = clock() + self.period
+        self._last = clock()
         self._stamps: deque[float] = deque(maxlen=61)
 
     def tick(self) -> float:
         """Wait for the next frame; returns seconds since the previous tick."""
-        now = time.perf_counter()
+        now = self._clock()
         if self._next - now > self.spin_s:
-            time.sleep(self._next - now - self.spin_s)
-        while time.perf_counter() < self._next:
+            self._sleep(self._next - now - self.spin_s)
+        while self._clock() < self._next:
             pass
-        now = time.perf_counter()
+        now = self._clock()
         # A slow frame doesn't make the next ones rush to catch up: schedule from whichever is
         # later, the deadline or now.
         self._next = max(self._next, now) + self.period
