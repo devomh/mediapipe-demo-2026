@@ -15,7 +15,7 @@ from ai_playground.audio.sfx import Sfx
 from ai_playground.config import Config
 from ai_playground.gestures.engine import GestureEngine
 from ai_playground.pacing import FramePacer
-from ai_playground.render import text
+from ai_playground.render import text, ui
 from ai_playground.render.background import Background
 from ai_playground.render.hud import Hud, Stats
 from ai_playground.render.keys import Hotkey, KeysOverlay
@@ -62,7 +62,9 @@ class App:
         text.reset()
         d = cfg.display
         self.fullscreen = d.fullscreen
+        ui.set_factor(d.ui_scale)
         self.surface = self._set_mode()
+        ui.set_window_height(self.surface.get_height())
         pygame.display.set_caption("AI Playground")
         self.viewport = Viewport(self.surface.get_size(), (cfg.camera.width, cfg.camera.height))
         self.background = Background()
@@ -102,8 +104,12 @@ class App:
 
     def toggle_fullscreen(self) -> None:
         self.fullscreen = not self.fullscreen
-        self.surface = self._set_mode()
-        self.viewport.update(window_size=self.surface.get_size())
+        self._on_resize(self._set_mode())
+
+    def _on_resize(self, surface: pygame.Surface) -> None:
+        self.surface = surface
+        self.viewport.update(window_size=surface.get_size())
+        ui.set_window_height(surface.get_height())
 
     # --- scenes -------------------------------------------------------------------------
     def switch_scene(self, name: str) -> None:
@@ -253,8 +259,7 @@ class App:
                     elif ev.type == pygame.KEYDOWN:
                         self._on_key(ev.key)
                     elif ev.type in (pygame.VIDEORESIZE, pygame.WINDOWSIZECHANGED):
-                        self.surface = pygame.display.get_surface()
-                        self.viewport.update(window_size=self.surface.get_size())
+                        self._on_resize(pygame.display.get_surface())
 
                 if self.source.error:
                     return self.error_screen("Something went wrong", self.source.error)
@@ -336,6 +341,8 @@ def show_error(surface: pygame.Surface, clock: pygame.time.Clock, title: str, me
             if ev.type == pygame.QUIT or (ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE):
                 return 1
         sw, sh = surface.get_size()
+        ui.set_window_height(sh)
+        px = ui.px
         surface.fill((40, 12, 16))
         text.draw(
             surface,
@@ -347,12 +354,12 @@ def show_error(surface: pygame.Surface, clock: pygame.time.Clock, title: str, me
             bold=True,
             anchor="midbottom",
         )
-        width = min(900, sw - 80)
+        width = min(px(900), sw - px(80))
         for i, line in enumerate(text.wrap(message, 22, width)):
             text.draw(
                 surface,
                 line,
-                (sw // 2, sh // 3 + 30 + 32 * i),
+                (sw // 2, sh // 3 + px(30) + px(32) * i),
                 (240, 210, 210),
                 22,
                 mono=False,
@@ -361,7 +368,7 @@ def show_error(surface: pygame.Surface, clock: pygame.time.Clock, title: str, me
         text.draw(
             surface,
             "Press Esc to quit",
-            (sw // 2, sh - 40),
+            (sw // 2, sh - px(40)),
             (180, 150, 150),
             16,
             mono=False,

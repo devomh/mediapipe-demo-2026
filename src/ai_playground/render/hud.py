@@ -8,6 +8,7 @@ import numpy as np
 import pygame
 
 from ai_playground.render import text
+from ai_playground.render.ui import px
 
 
 class RollingWindow:
@@ -77,16 +78,17 @@ class Hud:
         ]
         if status:
             lines.append(status)
-        w = max(text.font(14).size(line)[0] for line in lines) + 16
-        h = 18 * len(lines) + 10 + (20 if recording_s is not None else 0)
+        row = px(18)
+        w = max(text.font(14).size(line)[0] for line in lines) + px(16)
+        h = row * len(lines) + px(10) + (px(20) if recording_s is not None else 0)
         panel = pygame.Surface((w, h), pygame.SRCALPHA)
         panel.fill((0, 0, 0, 150))
-        surface.blit(panel, (8, 8))
+        surface.blit(panel, (px(8), px(8)))
         for i, line in enumerate(lines):
-            text.draw(surface, line, (16, 13 + 18 * i), size=14)
+            text.draw(surface, line, (px(16), px(13) + row * i), size=14)
         if recording_s is not None:
-            y = 13 + 18 * len(lines) + 9
-            pygame.draw.circle(surface, (235, 50, 50), (22, y), 6)
+            y = px(13) + row * len(lines) + px(9)
+            pygame.draw.circle(surface, (235, 50, 50), (px(22), y), px(6))
             text.draw(
-                surface, f"REC {recording_s:5.1f}s", (34, y), (255, 120, 120), anchor="midleft"
+                surface, f"REC {recording_s:5.1f}s", (px(34), y), (255, 120, 120), anchor="midleft"
             )

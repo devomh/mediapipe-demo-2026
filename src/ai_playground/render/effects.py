@@ -9,6 +9,7 @@ import pygame
 
 from ai_playground.physics.world import KINDS, Piece, shape_vertices
 from ai_playground.render import text
+from ai_playground.render.ui import px
 
 # 8 saturated hues that read well on a dark background.
 PALETTE = (
@@ -48,7 +49,7 @@ def draw_piece(
     color = PALETTE[piece.hue]
     a = piece.alpha
     fill, edge = fade_to(color, bg, a), fade_to(lighten(color, 0.8 if highlight else 0.45), bg, a)
-    width = 5 if highlight else 3
+    width = px(5 if highlight else 3)
     pos = piece.body.position
     if piece.kind == "circle":
         c = (round(pos.x), round(pos.y))
@@ -57,7 +58,7 @@ def draw_piece(
         pygame.draw.circle(surface, edge, c, r, width)
         # A spoke, so rolling is visible.
         tip = piece.body.local_to_world((piece.radius * 0.7, 0))
-        pygame.draw.line(surface, edge, c, (round(tip.x), round(tip.y)), 3)
+        pygame.draw.line(surface, edge, c, (round(tip.x), round(tip.y)), px(3))
     else:
         pts = piece_points(piece)
         pygame.draw.polygon(surface, fill, pts)
@@ -93,7 +94,7 @@ def draw_preview(
     surface.blit(layer, (round(pos[0] - c), round(pos[1] - c)))
     if ring:
         center = (round(pos[0]), round(pos[1]))
-        pygame.draw.circle(surface, lighten(color, 0.6), center, round(radius + 6), 2)
+        pygame.draw.circle(surface, lighten(color, 0.6), center, round(radius + px(6)), px(2))
 
 
 def draw_stretch_line(
@@ -101,10 +102,10 @@ def draw_stretch_line(
 ) -> None:
     """The glowing link between two pinch points while a shape is stretched."""
     color = PALETTE[hue]
-    pygame.draw.line(surface, fade_to(color, (10, 12, 18), 0.4), a, b, 9)
-    pygame.draw.line(surface, lighten(color, 0.7), a, b, 3)
+    pygame.draw.line(surface, fade_to(color, (10, 12, 18), 0.4), a, b, px(9))
+    pygame.draw.line(surface, lighten(color, 0.7), a, b, px(3))
     for p in (a, b):
-        pygame.draw.circle(surface, lighten(color, 0.7), (round(p[0]), round(p[1])), 7)
+        pygame.draw.circle(surface, lighten(color, 0.7), (round(p[0]), round(p[1])), px(7))
 
 
 def draw_palette(surface: pygame.Surface, selected: str, chosen: bool) -> None:
@@ -112,24 +113,28 @@ def draw_palette(surface: pygame.Surface, selected: str, chosen: bool) -> None:
 
     `chosen` means the other hand picked it; otherwise it's the automatic cycle's "next".
     """
-    cell, icon = 58, 17
-    w, h = 82, cell * len(KINDS) + 34
-    x = surface.get_width() - w - 8
+    cell, icon, top = px(58), px(17), px(34)
+    w, h = px(82), cell * len(KINDS) + top
+    x = surface.get_width() - w - px(8)
     y = (surface.get_height() - h) // 2
     panel = pygame.Surface((w, h), pygame.SRCALPHA)
     panel.fill((0, 0, 0, 120))
     surface.blit(panel, (x, y))
     label = "chosen" if chosen else "next"
-    text.draw(surface, label, (x + w // 2, y + 8), (90, 220, 255), 13, anchor="midtop")
+    text.draw(surface, label, (x + w // 2, y + px(8)), (90, 220, 255), 13, anchor="midtop")
     for i, kind in enumerate(KINDS):
-        cx, cy = x + w // 2 + 8, y + 34 + cell * i + cell // 2
+        cx, cy = x + w // 2 + px(8), y + top + cell * i + cell // 2
         lit = kind == selected
         color = (255, 255, 255) if lit else (120, 120, 130)
         if lit:
             pygame.draw.rect(
-                surface, (90, 220, 255), (x + 4, cy - cell // 2 + 3, w - 8, cell - 6), 2, 6
+                surface,
+                (90, 220, 255),
+                (x + px(4), cy - cell // 2 + px(3), w - px(8), cell - px(6)),
+                px(2),
+                px(6),
             )
-        text.draw(surface, str(i + 1), (x + 12, cy), color, 16, bold=True, anchor="midleft")
+        text.draw(surface, str(i + 1), (x + px(12), cy), color, 16, bold=True, anchor="midleft")
         if kind == "circle":
             pygame.draw.circle(surface, color, (cx, cy), icon)
         else:
@@ -153,12 +158,12 @@ def draw_paddle(
     color: tuple[int, int, int] = HAND_COLORS[0],
 ) -> None:
     """Soft ring where the open hand pushes shapes; fades in (`strength` < 1) while arming."""
-    size = round(radius * 2 + 6)
+    size = round(radius * 2 + px(6))
     layer = pygame.Surface((size, size), pygame.SRCALPHA)
     c = size / 2
     k = max(0.0, min(1.0, strength))
     pygame.draw.circle(layer, (*color, round(28 * k)), (c, c), radius)
-    pygame.draw.circle(layer, (*color, round(120 * k)), (c, c), radius, 2)
+    pygame.draw.circle(layer, (*color, round(120 * k)), (c, c), radius, px(2))
     surface.blit(layer, (round(pos[0] - c), round(pos[1] - c)))
 
 
@@ -170,11 +175,11 @@ def draw_grab_ring(
 ) -> None:
     """A hand holding a shape: a small ring that turns."""
     center = (round(pos[0]), round(pos[1]))
-    r = 16
+    r = px(16)
     start = (t * 4.0) % (2 * math.pi)
     rect = pygame.Rect(center[0] - r, center[1] - r, 2 * r, 2 * r)
-    pygame.draw.circle(surface, (40, 44, 60), center, r + 3)
-    pygame.draw.arc(surface, color, rect, start, start + 4.2, 4)
+    pygame.draw.circle(surface, (40, 44, 60), center, r + px(3))
+    pygame.draw.arc(surface, color, rect, start, start + 4.2, px(4))
 
 
 def draw_pinch_dot(
@@ -182,8 +187,8 @@ def draw_pinch_dot(
 ) -> None:
     """Where a pinch is (making or about to make a shape)."""
     center = (round(pos[0]), round(pos[1]))
-    pygame.draw.circle(surface, (20, 22, 30), center, 9)
-    pygame.draw.circle(surface, color, center, 6)
+    pygame.draw.circle(surface, (20, 22, 30), center, px(9))
+    pygame.draw.circle(surface, color, center, px(6))
 
 
 def draw_hand_marker(
@@ -191,15 +196,15 @@ def draw_hand_marker(
 ) -> None:
     """A hand the computer sees but that isn't doing anything yet: a faint small ring."""
     center = (round(pos[0]), round(pos[1]))
-    pygame.draw.circle(surface, fade_to(color, (10, 12, 18), 0.55), center, 12, 2)
+    pygame.draw.circle(surface, fade_to(color, (10, 12, 18), 0.55), center, px(12), px(2))
 
 
 def draw_progress_ring(surface: pygame.Surface, pos: tuple[float, float], frac: float) -> None:
     """Fills clockwise from the top while both fists are held (two-fist clear)."""
     center = (round(pos[0]), round(pos[1]))
-    r = 44
+    r = px(44)
     rect = pygame.Rect(center[0] - r, center[1] - r, 2 * r, 2 * r)
-    pygame.draw.circle(surface, (60, 64, 80), center, r, 4)
+    pygame.draw.circle(surface, (60, 64, 80), center, r, px(4))
     if frac > 0:
         end = math.pi / 2
-        pygame.draw.arc(surface, (255, 120, 90), rect, end - 2 * math.pi * frac, end, 7)
+        pygame.draw.arc(surface, (255, 120, 90), rect, end - 2 * math.pi * frac, end, px(7))

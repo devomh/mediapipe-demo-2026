@@ -8,9 +8,10 @@ import numpy as np
 import pygame
 
 from ai_playground.render.effects import PALETTE, lighten
+from ai_playground.render.ui import px
 
 LEVELS = 8  # brightness steps; additive blending makes a darker sprite a fainter particle
-SIZES = (3, 5, 8)  # sprite radii, px
+SIZES = (3, 5, 8)  # sprite radii, px at 720 px tall (render/ui scales them)
 
 
 def glow_sprite(color: tuple[int, int, int], radius: int, intensity: float = 1.0) -> pygame.Surface:
@@ -87,11 +88,11 @@ class Particles:
         self.pos[live] += v * dt
         self.life[live] -= dt
 
-    def _sprite(self, hue: int, size: int, level: int) -> pygame.Surface:
-        key = (hue, size, level)
+    def _sprite(self, hue: int, radius: int, level: int) -> pygame.Surface:
+        key = (hue, radius, level)
         s = self._sprites.get(key)
         if s is None:
-            s = glow_sprite(lighten(PALETTE[hue], 0.35), SIZES[size], (level + 1) / LEVELS)
+            s = glow_sprite(lighten(PALETTE[hue], 0.35), radius, (level + 1) / LEVELS)
             self._sprites[key] = s
         return s
 
@@ -103,10 +104,11 @@ class Particles:
         levels = np.minimum((frac * LEVELS).astype(np.int32), LEVELS - 1)
         xy = self.pos[idx].astype(np.int32)
         hues, sizes = self.hue[idx], self.size[idx]
+        radii = [max(1, px(r)) for r in SIZES]
         seq = []
         for i in range(len(idx)):
-            sp = self._sprite(int(hues[i]), int(sizes[i]), int(levels[i]))
-            r = SIZES[sizes[i]]
+            r = radii[sizes[i]]
+            sp = self._sprite(int(hues[i]), r, int(levels[i]))
             seq.append((sp, (int(xy[i, 0]) - r, int(xy[i, 1]) - r)))
         surface.fblits(seq, pygame.BLEND_ADD)
 

@@ -6,18 +6,25 @@ from functools import cache
 
 import pygame
 
+from ai_playground.render import ui
+
 MONO = ["menlo", "dejavusansmono", "ubuntumono", "couriernew", "monospace"]
 SANS = ["helveticaneue", "helvetica", "dejavusans", "ubuntu", "arial"]
 
 
-@cache
 def font(size: int, mono: bool = True, bold: bool = False) -> pygame.font.Font:
-    return pygame.font.SysFont(MONO if mono else SANS, size, bold=bold)
+    """`size` is laid out at 720 px tall; the font returned is scaled to the window (render/ui)."""
+    return _font(max(6, ui.px(size)), mono, bold)
+
+
+@cache
+def _font(px_size: int, mono: bool, bold: bool) -> pygame.font.Font:
+    return pygame.font.SysFont(MONO if mono else SANS, px_size, bold=bold)
 
 
 def reset() -> None:
     """Drop cached fonts; call after (re)initializing pygame, as old Font objects are invalid."""
-    font.cache_clear()
+    _font.cache_clear()
 
 
 def draw(
@@ -35,7 +42,8 @@ def draw(
     img = f.render(text, True, color)
     rect = img.get_rect(**{anchor: pos})
     if shadow:
-        surface.blit(f.render(text, True, (0, 0, 0)), rect.move(1, 1))
+        off = max(1, ui.px(1))
+        surface.blit(f.render(text, True, (0, 0, 0)), rect.move(off, off))
     surface.blit(img, rect)
     return rect
 

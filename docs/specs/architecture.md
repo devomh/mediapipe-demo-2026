@@ -117,7 +117,7 @@ ai-playground/                      (repo root)
 │   ├── gestures/       features.py  detectors.py  engine.py            ◄ portable core
 │   ├── ml/             strokes.py  charnet.py                           ◄ portable (Air Writing)
 │   │                   features.py  dataset.py  classifier.py  pca.py   (Train-a-Gesture, parked)
-│   ├── render/         viewport.py  overlay.py  hud.py  background.py  effects.py  text.py
+│   ├── render/         viewport.py  ui.py  overlay.py  hud.py  keys.py  background.py  effects.py  text.py
 │   ├── physics/        world.py                                        (Phase A)
 │   ├── audio/          sfx.py (Phase A)  engine.py  voices.py  dsp.py  scales.py  (Phase B; scales.py portable)
 │   └── scenes/         base.py  vision.py  geometry.py  writing.py  ·  later: attract.py  train.py  synth.py  orchestra.py
@@ -163,6 +163,10 @@ switch from the brainstorm.
 - **Screen pixels:** `render/viewport.py` maps normalized → pixels using *cover* scaling (camera
   image fills the window, edges cropped). It also provides the inverse mapping. Every scene uses
   the viewport. Nobody multiplies by window size by hand.
+- **UI pixels:** text, panels, cursors and line widths are laid out for a 720 px tall window and
+  go through `render/ui.py` (`ui.px(...)`, and `text.font` scales its sizes), which multiplies by
+  window height / 720 times `[display] ui_scale`. A maximized or fullscreen window on a 5K
+  monitor shows the same layout, only bigger.
 - **Physics space:** pymunk uses screen pixels with y pointing down (gravity `+y`) to avoid a third
   coordinate system.
 - **Hand-relative features** (for pinch and ML) use **world landmarks** (metres), which don't
