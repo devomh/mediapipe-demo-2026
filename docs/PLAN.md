@@ -13,8 +13,10 @@ Source brainstorm: [`ideas01.md`](ideas01.md). Specs: [`specs/`](specs/).
 
 - A fun, self-explanatory exhibit for an event. A visitor walks up, raises a hand, and is
   creating something within ~10 seconds, with no instructions from staff.
+- The event is a **booth or table with people passing by**, not a room visitors settle into.
+  Each demo must pay off within seconds and make sense in under a minute (D11).
 - Every mode can show the machine learning behind it (landmarks, numbers, predictions), and one
-  mode lets the visitor **train a model themselves**.
+  mode shows **a neural network reading what the visitor writes in the air**.
 - Runs offline on a single laptop: **MacBook (Apple Silicon)** as the primary machine and an
   **Ubuntu laptop (x86_64)** as the secondary, from the same repo and `uv.lock`.
 
@@ -37,16 +39,22 @@ Source brainstorm: [`ideas01.md`](ideas01.md). Specs: [`specs/`](specs/).
 | D4 | `pygame-ce` for window, rendering, and input, on the **main thread** | macOS requires UI on the main thread; one rendering stack for all modes |
 | D5 | `pymunk` for 2D physics | Collisions, joints, and collision callbacks without writing our own physics |
 | D6 | `sounddevice` + NumPy callback synth for audio | Low latency, no external synth; MediaPipe already depends on it |
-| D7 | `scikit-learn` (k-NN) for Train-a-Gesture | Students will meet the same library in class; training is instant |
+| D7 | `scikit-learn` (k-NN) for Train-a-Gesture *(parked with Train-a-Gesture, D11)* | Students will meet the same library in class; training is instant |
 | D8 | Record **landmarks only, never video** | Privacy and consent at a public event, and a teaching point |
 | D9 | Gesture logic is pure NumPy and tested with recorded fixtures | Testable without a camera; CI runs on both OSes |
-| D10 | Train-a-Gesture ships in **Phase A** | It is the part that actually teaches ML, so it must not be cut |
+| D10 | ~~Train-a-Gesture ships in Phase A~~ *Superseded by D11 (2026-11-01)* | It was the part that taught ML; Air Writing now covers that |
+| D11 | **Booth format** (2026-11-01): every demo pays off in seconds. Train-a-Gesture is parked; **Air Writing** (pinch to write a character in the air, a CNN reads it) becomes Phase A's ML mode | Passers-by won't stay ~60 s for a guided training flow. "The computer read what I wrote" lands in seconds and is still visibly ML |
+| D12 | Character recognizer: a **CNN trained offline in Colab** (PyTorch) on EMNIST digits + uppercase letters (36 classes). Weights ship as `.npz`, **inference is pure NumPy** | No new runtime dependency (no torch or onnxruntime in `uv.lock`), ~1 ms per read, identical on both OSes |
+| D13 | Geometry **sound effects** with `pygame.mixer`, sounds synthesized with NumPy at startup | Comes with pygame-ce; effects don't need the Phase B synth engine; no sample files, so no licensing questions |
+| D14 | **Booth-minimum shell:** fullscreen, idle reset, one hint line per scene, mute, operator hotkeys. Attract screen and dwell-button navigation are parked | Staff at the table switch scenes; the screen must just never be left in a messy state |
 
 ## 3. Phases
 
 ```
-Phase 0  Foundation ──► Phase A  Magic Geometry + Train-a-Gesture ──► Phase B  AirSynth ──► Phase C  Physics Orchestra
- (engine, no fun yet)    (first complete exhibit)                     (audio engine)         (A + B combined, exhibit polish)
+Phase 0  Foundation ──► Phase A  Magic Geometry + Air Writing ──► later: Phase B  AirSynth ──► Phase C  Physics Orchestra
+ (engine, no fun yet)    (the booth exhibit)                             (audio engine)        (A + B combined, exhibit polish)
+
+Parked (D11, D14): Train-a-Gesture, attract screen, dwell-button navigation. Specs kept for later.
 ```
 
 Every phase ends with something that runs, can be demoed, and is tested on **both** macOS and
@@ -65,18 +73,24 @@ Camera → MediaPipe → identity tracking + smoothing → gesture engine → ev
 - Pipeline latency (capture → displayed) is measured, shown in the HUD, and under 100 ms.
 - `--record` / `--replay` work. At least 6 fixture clips are committed. CI is green on macOS and Ubuntu.
 
-### Phase A — Magic Geometry + Train-a-Gesture · [spec](specs/phaseA-magic-geometry.md)
+### Phase A — Magic Geometry + Air Writing · [Geometry spec](specs/phaseA-magic-geometry.md) · [Air Writing spec](specs/phaseA-air-writing.md)
 
 Pinch to create shapes, throw them, push them with your hand, grab them with a fist. Gravity,
-collisions, colors, particles. Then **Train-a-Gesture**: record 3 poses, train k-NN live, and
-watch a 2D PCA map of your own data. Trained gestures trigger effects in Geometry. Includes the
-exhibit shell (attract screen, onboarding hints, operator hotkeys, fullscreen).
+collisions, colors, particles, and **sound effects**. Then **Air Writing**: pinch to write a digit
+or capital letter in the air, make a fist, and a neural network reads it, showing the 28×28 image
+it sees and its top three guesses. Includes the booth-minimum shell (fullscreen, idle reset, hints,
+mute, operator hotkeys).
+
+*Changed 2026-11-01 (D11, D14):* Train-a-Gesture, the attract screen, and dwell-button navigation
+are parked. Their spec sections stay in place for later.
 
 **Exit criteria**
 
 - A first-time user (someone not on the team) creates and throws a shape within 10 s, unprompted.
-- Train-a-Gesture: 3 classes recorded and trained in under 60 s total, with ≥ 90 % live recognition
-  for the person who trained it.
+- A first-time user gets a character read within 30 s, with at most a one-line hint.
+- Air Writing accuracy on the committed air-written evaluation set (digits + uppercase, several
+  writers): ≥ 90 % top-1 and ≥ 97 % top-3. *Provisional:* revisit once the first model is measured
+  (Air Writing W.3).
 - 30-minute soak test with no crash and no frame-rate degradation.
 
 ### Phase B — AirSynth · [spec](specs/phaseB-airsynth.md)
@@ -121,6 +135,8 @@ operations checklist.
 | Python audio callback underruns under rendering load | Medium | Larger block size; fall back to running audio in a separate process ([Phase B §2](specs/phaseB-airsynth.md#2-audio-engine-audioenginepy-audiovoicespy-audiodsppy)) |
 | macOS camera permission or wrong camera index on event day | Medium | Startup check with clear on-screen error; `--list-cameras`; ops checklist |
 | Gestures feel unreliable for new users | Medium | Small gesture vocabulary, hysteresis, onboarding hints, test with new users at every phase |
+| Air-written characters look unlike EMNIST's pen scans (wobbly, even stroke width, slanted), so accuracy drops | High | One framing function shared by training and the app; augmentation that imitates air-writing; measure on our own air-written set before building the UI polish; fine-tune on it if needed ([Air Writing §5](specs/phaseA-air-writing.md#5-model)) |
+| Booth noise drowns the sound effects, or they annoy the neighbouring booths | Medium | Volume in config, `M` mutes, test with the event speakers |
 | MediaPipe API change in a future release | Low | Version pinned in `uv.lock`; MediaPipe is called from one module only (`tracking/recognizer.py`) |
 | Ubuntu laptop missing system libraries (PortAudio) | Medium | `sudo apt install libportaudio2` in README; startup check. Needed from Phase 0: `import mediapipe` imports `sounddevice` |
 | Duplicate SDL2 on macOS: the OpenCV wheel bundles its own (via FFmpeg) next to pygame-ce's; the ObjC runtime warns of "mysterious crashes" | Low | Import pygame before cv2/mediapipe everywhere (`__main__.py`, `tests/conftest.py`); watch for it in soak tests. The headless OpenCV wheel bundles SDL2 too, so swapping wheels doesn't help |
