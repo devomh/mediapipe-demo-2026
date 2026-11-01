@@ -101,6 +101,7 @@ class DisplayConfig:
     fullscreen: bool
     display_index: int
     target_fps: int
+    ui_scale: float  # text, panels and cursors: this x (window height / 720)
 
 
 @dataclass(frozen=True, slots=True)

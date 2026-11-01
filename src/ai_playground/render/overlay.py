@@ -14,6 +14,7 @@ from ai_playground.config import PinchConfig
 from ai_playground.gestures import features as F
 from ai_playground.gestures.engine import HandState
 from ai_playground.render import text
+from ai_playground.render.ui import px
 from ai_playground.render.viewport import Viewport
 from ai_playground.types import GestureEvent
 
@@ -74,7 +75,7 @@ class VisionOverlay:
             x, y = vp.to_px(*f.pos)
             img = text.font(16, bold=True).render(f.label, True, (255, 255, 255))
             img.set_alpha(alpha)
-            surface.blit(img, img.get_rect(midbottom=(x, y - 14 - int(20 * f.age / FLASH_S))))
+            surface.blit(img, img.get_rect(midbottom=(x, y - px(14) - px(20 * f.age / FLASH_S))))
 
     def _draw_skeleton(self, surface: pygame.Surface, vp: Viewport, s: HandState) -> None:
         lm = s.tracked.hand.landmarks
@@ -92,9 +93,10 @@ class VisionOverlay:
             pygame.draw.circle(surface, (20, 20, 20), p, r + 2)
             pygame.draw.circle(surface, FINGER_COLORS[_finger_of(i)] if i else PALM_COLOR, p, r)
             if self.show_indices:
-                text.draw(surface, str(i), (p[0] + r + 2, p[1] - r - 2), size=12, shadow=True)
+                d = r + px(2)
+                text.draw(surface, str(i), (p[0] + d, p[1] - d), size=12, shadow=True)
         if s.pinching:
-            pygame.draw.circle(surface, ACCENT, vp.to_px(*s.features.pinch_point), 18, 3)
+            pygame.draw.circle(surface, ACCENT, vp.to_px(*s.features.pinch_point), px(18), px(3))
 
     def _draw_hand_panel(self, surface: pygame.Surface, vp: Viewport, s: HandState) -> None:
         hand, f, cfg = s.tracked.hand, s.features, self.pinch_cfg
@@ -103,55 +105,58 @@ class VisionOverlay:
             f"{hand.gesture} {hand.gesture_score:.2f}",
             f"fingers {f.finger_count}",
         ]
-        pw, ph = 190, 18 * len(lines) + 46
+        row, m = px(18), px(8)
+        pw, ph = px(190), row * len(lines) + px(46)
         wx, wy = vp.to_px(float(hand.landmarks[F.WRIST, 0]), float(hand.landmarks[F.WRIST, 1]))
         sw, sh = surface.get_size()
         # Toward the screen middle (mirror view: right hand on the right), clear of the table.
-        inward = wx - 30 - pw if hand.handedness == "Right" else wx + 30
-        x = min(max(8, inward), sw - pw - 8)
-        y = min(max(8, wy - ph // 2), sh - ph - 8)
+        inward = wx - px(30) - pw if hand.handedness == "Right" else wx + px(30)
+        x = min(max(m, inward), sw - pw - m)
+        y = min(max(m, wy - ph // 2), sh - ph - m)
         panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
         panel.fill(PANEL_BG)
         surface.blit(panel, (x, y))
         for i, line in enumerate(lines):
-            text.draw(surface, line, (x + 8, y + 6 + 18 * i), size=14)
+            text.draw(surface, line, (x + m, y + px(6) + row * i), size=14)
 
         # Pinch-ratio bar: 0 .. 1.2 palm lengths, enter/exit thresholds marked.
-        bx, by, bw, bh = x + 8, y + 12 + 18 * len(lines), pw - 16, 12
+        bx, by, bw, bh = x + m, y + px(12) + row * len(lines), pw - 2 * m, px(12)
         full = 1.2
         lit = s.pinching
-        pygame.draw.rect(surface, (60, 60, 70), (bx, by, bw, bh), border_radius=3)
+        pygame.draw.rect(surface, (60, 60, 70), (bx, by, bw, bh), border_radius=px(3))
         fill = min(f.pinch_ratio, full) / full
         pygame.draw.rect(
             surface,
             ACCENT if lit else (150, 150, 160),
             (bx, by, round(bw * fill), bh),
-            border_radius=3,
+            border_radius=px(3),
         )
         for thr, color in ((cfg.enter, (90, 255, 140)), (cfg.exit, (255, 120, 90))):
             tx = bx + round(bw * thr / full)
-            pygame.draw.line(surface, color, (tx, by - 3), (tx, by + bh + 3), 2)
+            pygame.draw.line(surface, color, (tx, by - px(3)), (tx, by + bh + px(3)), px(2))
         label = "PINCH" if lit else f"pinch {f.pinch_ratio:.2f}"
-        text.draw(surface, label, (bx, by + bh + 3), ACCENT if lit else (200, 200, 200), size=12)
+        text.draw(
+            surface, label, (bx, by + bh + px(3)), ACCENT if lit else (200, 200, 200), size=12
+        )
 
     def _draw_table(self, surface: pygame.Surface, s: HandState) -> None:
         lm = s.tracked.hand.landmarks
         sw, sh = surface.get_size()
-        row_h, size = 16, 13
-        pw, ph = 250, 28 + row_h * (len(lm) + 1) + 8
-        x, y = sw - pw - 8, max(8, (sh - ph) // 2)
+        row_h, size, m, title_h = px(16), 13, px(8), px(28)
+        pw, ph = px(250), title_h + row_h * (len(lm) + 1) + m
+        x, y = sw - pw - m, max(m, (sh - ph) // 2)
         panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
         panel.fill(PANEL_BG)
         surface.blit(panel, (x, y))
-        text.draw(surface, "What the computer sees", (x + 8, y + 6), ACCENT, size=14, bold=True)
-        y0 = y + 28
-        text.draw(surface, " #      x       y       z", (x + 8, y0), (150, 150, 160), size=size)
+        text.draw(surface, "What the computer sees", (x + m, y + px(6)), ACCENT, size=14, bold=True)
+        y0 = y + title_h
+        text.draw(surface, " #      x       y       z", (x + m, y0), (150, 150, 160), size=size)
         tips = set(F.FINGERTIPS)
         for i in range(len(lm)):
             ry = y0 + row_h * (i + 1)
             color = (200, 200, 200)
             if i in tips:
                 color = FINGER_COLORS[_finger_of(i)]
-                pygame.draw.rect(surface, (*color, 40), (x + 4, ry - 1, pw - 8, row_h), 1)
+                pygame.draw.rect(surface, (*color, 40), (x + px(4), ry - 1, pw - m, row_h), 1)
             row = f"{i:2d}  {lm[i, 0]:6.3f}  {lm[i, 1]:6.3f}  {lm[i, 2]:6.3f}"
-            text.draw(surface, row, (x + 8, ry), color, size=size)
+            text.draw(surface, row, (x + m, ry), color, size=size)
