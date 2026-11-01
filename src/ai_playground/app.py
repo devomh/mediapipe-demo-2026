@@ -11,6 +11,7 @@ from typing import Protocol
 
 import pygame
 
+from ai_playground.audio.sfx import Sfx
 from ai_playground.config import Config
 from ai_playground.gestures.engine import GestureEngine
 from ai_playground.pacing import FramePacer
@@ -65,11 +66,13 @@ class App:
         pygame.display.set_caption("AI Playground")
         self.viewport = Viewport(self.surface.get_size(), (cfg.camera.width, cfg.camera.height))
         self.background = Background()
+        self.sfx = Sfx.open(cfg.sound.enabled, cfg.sound.volume, cfg.geometry.inflate_s)
         self.ctx = AppContext(
             config=cfg,
             viewport=self.viewport,
             background=self.background,
             switch_scene=self.switch_scene,
+            sfx=self.sfx,
         )
         self.tracker = HandTracker(cfg.tracking)
         self.engine = GestureEngine(cfg.gestures)
@@ -198,6 +201,14 @@ class App:
                 available=lambda: hasattr(self.scene, "effects_on"),
             ),
             Hotkey(
+                (pygame.K_m,),
+                "M",
+                "Sound",
+                lambda _k: self.sfx.toggle_mute(),
+                state=lambda: onoff(not self.sfx.muted),
+                available=lambda: self.sfx.available,
+            ),
+            Hotkey(
                 (pygame.K_r,),
                 "R",
                 "Record landmarks",
@@ -290,6 +301,7 @@ class App:
         finally:
             self.source.stop()
             self.stop_recording()
+            self.sfx.close()
         return 0
 
     def _process(self, frame: HandFrame) -> None:

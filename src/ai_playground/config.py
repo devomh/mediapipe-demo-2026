@@ -158,6 +158,17 @@ class EffectsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SoundConfig:
+    enabled: bool
+    volume: float
+    impact_min_dv: float
+    impact_full_dv: float
+    max_impacts_per_frame: int
+    piece_cooldown_s: float
+    throw_min_speed: float
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     camera: CameraConfig
     recognizer: RecognizerConfig
@@ -168,6 +179,7 @@ class Config:
     physics: PhysicsConfig
     geometry: GeometryConfig
     effects: EffectsConfig
+    sound: SoundConfig
 
     def model_path(self) -> Path:
         p = Path(self.recognizer.model_path)

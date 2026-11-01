@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import pygame
 
+from ai_playground.audio.sfx import Sfx
 from ai_playground.config import Config
 from ai_playground.gestures.engine import HandState
 from ai_playground.render.background import Background
@@ -22,7 +23,8 @@ class AppContext:
     background: Background
     switch_scene: Callable[[str], None]
     frame: HandFrame | None = None  # newest frame from the source
-    custom_model: Any = None  # trained custom-gesture model (Phase A)
+    sfx: Sfx = field(default_factory=Sfx)  # sound effects; silent unless the app opened them
+    custom_model: Any = None  # trained custom-gesture model (parked)
     audio: Any = None  # audio engine (Phase B)
 
 
