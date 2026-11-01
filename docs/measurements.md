@@ -62,4 +62,28 @@ background, glows, shapes, particles, hand cursors, palette, HUD, keys overlay.
 - Glow sprites are scaled from one base per colour: computing a large gradient directly took
   5–12 ms (a hitch while stretching a big shape at 1080p), scaling takes ≤ 0.64 ms.
 
+## Ubuntu desktop: Dell XPS 8950 (Intel i7-12700, 20 threads), Ubuntu 26.04.1, Python 3.12.13, mediapipe 1.2.0
+
+### Live camera, Geometry scene (2026-11-01)
+
+USB "HD Web Camera" at index 0, `--scene geometry`, 1280×720 window under XWayland (GNOME
+Wayland session). HUD values read from 3–4 window captures over about 10–15 s per run; CPU and
+memory sampled with `pidstat` over the same period (20 s / 15 s).
+
+| Metric | One hand | Two hands |
+|--------|----------|-----------|
+| Camera FPS delivered | 30.0 | 30.0 |
+| Inference ms (mean; the HUD does not show p95) | 21 | 17–18 |
+| Render FPS | 60.0 | 59.7–60.0 |
+| Pipeline latency ms (mean / p95) | 46 / 49–60 | 40–41 / 51–54 |
+| CPU % (of one core; 20 threads total) | 107 (102.5 user + 4.75 system) | 108 (103.8 user + 4.3 system) |
+| Memory (RSS) | 345 MB | 404 MB |
+
+- Inference takes about 2–2.4× as long as on the M5 Pro (17–21 vs 8.8 ms). It runs on the worker
+  thread, so render stays at 60 FPS, and latency is about half of the 100 ms limit.
+- The second hand added no measurable cost. The two-hand run was a little faster, which is
+  within run-to-run variation (hand pose, CPU clock), not an effect of the second hand.
+- RSS grew 345 → 404 MB between the runs, which were about 3 minutes apart. That is one sample,
+  not a trend; the 30-minute soak test (A.9) is where to check for a leak.
+
 ## Ubuntu laptop (x86_64): pending
