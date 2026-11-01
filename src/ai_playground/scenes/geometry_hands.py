@@ -39,10 +39,14 @@ class HandPlay:
         cfg: GeometryConfig,
         busy: Callable[[int], bool],
         on_clear: Callable[[], None],
+        on_grab: Callable[[Piece], None] | None = None,
+        on_release: Callable[[Piece], None] | None = None,
     ) -> None:
         self.world, self.vp, self.cfg = world, viewport, cfg
         self.busy = busy  # hand is making a shape (pinch owner or stretch partner)
         self.on_clear = on_clear
+        self.on_grab = on_grab  # after a grab (fist or pinch)
+        self.on_release = on_release  # after a thrown release, with the piece's new velocity
         self.grabbed: dict[int, Grab] = {}  # hand id -> what it holds
         self.fist_pos: dict[int, tuple[float, float]] = {}  # px, hands currently in a fist
         # hand -> (palm px, paddle radius px, 0..1) while an open palm arms into a paddle
@@ -96,6 +100,8 @@ class HandPlay:
         self.grabbed[hand_id] = Grab(piece, by)
         self._vel[hand_id] = deque()
         self.grabs += 1
+        if self.on_grab is not None:
+            self.on_grab(piece)
         return True
 
     def _release(self, hand_id: int, lost: bool) -> None:
@@ -103,6 +109,8 @@ class HandPlay:
         piece = self.world.release(hand_id, throw=not lost, velocity=self._peak_velocity(hand_id))
         if piece is not None:
             self.throws.append(math.hypot(*piece.body.velocity))
+            if not lost and self.on_release is not None:
+                self.on_release(piece)
 
     def _drop_hand(self, hand_id: int) -> None:
         self.grabbed.pop(hand_id, None)

@@ -106,9 +106,9 @@ Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
 | Event | Sound | Varies with |
 |-------|-------|-------------|
 | Spawn (pinch in empty space) | Soft "pop": short sine blip with a falling pitch | – |
-| Inflate (while held) | Quiet rising tone that follows the size, on one reserved channel; stops on release | Size |
+| Inflate (while held) | Quiet tone rising 220 → 660 Hz over `inflate_s`, pre-rendered to match the inflation, on one reserved channel. Stops on release; a two-hand stretch has no tone | Time held (= size) |
 | Throw (release faster than `throw_min_speed`) | "Whoosh": band-passed noise burst | Release speed → volume |
-| Impact | Short struck tone. **Timbre from the shape** (circle: sine; triangle: bright, with harmonics; square and pentagon: woody, noise attack; bar: low knock) | **Pitch from size** (bigger = lower, 5 size buckets); **volume from impulse** |
+| Impact | Short struck tone from the **lighter** shape of the pair, as with the sparks. **Timbre from the shape** (circle: glassy; triangle: bright, with harmonics; square and pentagon: woody, noise attack; bar: low knock) | **Pitch from size** (bigger = lower: 5 log-spaced size buckets on C major pentatonic, C6 down to C5, square and pentagon an octave lower, bar two); **volume from the hit's speed change** |
 | Grab (fist or pinch) | Soft click | – |
 | Clear (two fists) | Falling sweep plus a noise burst | – |
 
@@ -116,15 +116,21 @@ The bank is 5 shape types × 5 size buckets of impact sounds plus the five other
 sounds.
 
 **Impact limiter** (the 40-shape pile must not buzz):
-- ignore impulses below `min_impulse`;
+- ignore hits that change the lighter shape's speed by less than `impact_min_dv` (0.3 window
+  heights/s; the sparks use the same measure). Impulse alone would make heavy shapes loud and
+  small ones silent;
 - at most `max_impacts_per_frame` (3) per frame, loudest first;
 - a per-piece cooldown of `piece_cooldown_s` (0.08 s), so shapes resting on each other stay quiet.
 
 **Robustness:** if the mixer cannot open (no audio device, CI), log one warning and run silently.
 Sound never crashes the exhibit. Tests run with `SDL_AUDIODRIVER=dummy`.
 
-**Config `[sound]`:** `enabled`, `volume`, `min_impulse`, `max_impacts_per_frame`,
-`piece_cooldown_s`, `throw_min_speed`. Operator key **`M`** toggles mute; the state shows in the
+**Config `[sound]`:** `enabled`, `volume`, `impact_min_dv`, `impact_full_dv` (full volume),
+`max_impacts_per_frame`, `piece_cooldown_s`, `throw_min_speed`.
+
+*Measured in A.5 (Ubuntu desktop):* synthesis 70 ms at startup; frame cost unchanged with sound
+on (~1.1 ms update + draw while 40 shapes collapse); a 40-shape pile plays 30+ impact sounds in
+its first second, under 10 in its third, then none. Operator key **`M`** toggles mute; the state shows in the
 keys overlay.
 
 *Relation to Phase C:* Physics Orchestra later makes collisions musical through the Phase B synth
@@ -255,7 +261,7 @@ Buttons:
 | A.2 ✓ | Shape choice by finger count; two-hand stretch | Choice is reliable for 1/3/4/5 fingers in the fixture test |
 | A.3 ✓ | Hand paddle, fist grab, two-fist clear | Each action works for 2 new users without explanation |
 | A.4 ✓ | Visual polish: palette, glow, particles, preview, cursors | 60 FPS with 40 bodies and 1,500 particles on both machines |
-| A.5 | Sound effects (§4.1) | Every event in §4.1 sounds; a 40-shape pile stays quiet; 60 FPS kept; silent run without an audio device |
+| A.5 ✓ | Sound effects (§4.1) | Every event in §4.1 sounds; a 40-shape pile stays quiet; 60 FPS kept; silent run without an audio device |
 | A.6 | Booth-minimum shell (§6.0) | Idle reset, hint line, hold-Esc quit, and `1`/`2`/`3`/`M` work in both scenes |
 | A.7 | Air Writing, milestones W.1–W.5 ([spec](phaseA-air-writing.md#10-milestones)) | Air Writing exit criteria in PLAN §3 met |
 | A.8 | Test with ≥ 5 new users, 30-min soak test, Ubuntu laptop check, tag `v0.A` | PLAN §3 Phase A exit criteria met |

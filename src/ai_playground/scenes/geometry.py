@@ -8,6 +8,10 @@
   (scenes/geometry_hands.py).
 
 - A.4: glow behind shapes, particles (impacts, releases, clear), hand cursors per track colour.
+
+- A.5: sound effects: pop on spawn, a rising tone while inflating, whoosh on throws, click on
+  grabs, struck tones on impacts (timbre from the kind, pitch from the size, volume from the
+  hit), and a sweep on clear (audio/sfx.py).
 """
 
 from __future__ import annotations
@@ -19,8 +23,9 @@ from dataclasses import dataclass
 
 import pygame
 
+from ai_playground.audio.sfx import Hit, ImpactLimiter, impact_name, size_bucket
 from ai_playground.gestures.engine import HandState
-from ai_playground.physics.world import KINDS, World
+from ai_playground.physics.world import KINDS, Piece, World
 from ai_playground.render import effects
 from ai_playground.render.particles import GlowCache, Particles
 from ai_playground.scenes.base import AppContext
@@ -95,6 +100,8 @@ class GeometryScene:
         self._pinch: dict[int, tuple[tuple[float, float], tuple[float, float]]] = {}  # pos px, vel
         self._owner: dict[int, int] = {}  # stretching hand -> hand that owns the shape
         self.play: HandPlay | None = None
+        self.limiter = ImpactLimiter(3, 0.08)
+        self._inflating: set[int] = set()  # hands whose shape is inflating (tone playing)
 
     # --- lifecycle ----------------------------------------------------------------------
     def enter(self, ctx: AppContext) -> None:
@@ -108,7 +115,11 @@ class GeometryScene:
             g,
             busy=lambda hid: hid in self.pending or hid in self._owner,
             on_clear=self._burst,
+            on_grab=self._on_grab,
+            on_release=self._on_throw,
         )
+        snd = ctx.config.sound
+        self.limiter = ImpactLimiter(snd.max_impacts_per_frame, snd.piece_cooldown_s)
         e = ctx.config.effects
         self.particles = Particles(e.particle_cap, seed=self._rng.randrange(2**31))
         self.glow = GlowCache(e.glow_scale, e.glow_intensity)
@@ -119,6 +130,9 @@ class GeometryScene:
 
     def exit(self) -> None:
         self.clear()
+        if self.ctx is not None:
+            self.ctx.sfx.stop_inflate()
+        self._inflating = set()
         if self.play is not None:
             self.play.reset()
         self.world = None
@@ -156,6 +170,7 @@ class GeometryScene:
         for piece in self.world.pieces:
             pos = piece.body.position
             self._emit(n, (pos.x, pos.y), piece.hue, speed=(0.2 * h, 0.9 * h), life=(0.6, 1.3))
+        self.ctx.sfx.play("clear")
         self.clear()
 
     def _sparks(self) -> None:
@@ -176,6 +191,56 @@ class GeometryScene:
             budget -= n
             v = min(dv, 2.0 * h)
             self._emit(n, imp.pos, pieces[0].hue, speed=(0.15 * v, 0.5 * v), life=(0.25, 0.6))
+
+    # --- sound --------------------------------------------------------------------------
+    def _x(self, px: float) -> float:
+        """Pixel x -> 0..1 across the window, for panning."""
+        assert self.ctx is not None
+        return px / max(1, self.ctx.viewport.window_size[0])
+
+    def _impact_sounds(self) -> None:
+        """A struck tone per hard hit: the lighter shape sounds, as with the sparks. Its kind
+        picks the timbre, its size the pitch, the speed change the volume."""
+        assert self.world is not None and self.ctx is not None
+        w, h = self.ctx.viewport.window_size
+        snd, g = self.ctx.config.sound, self.ctx.config.geometry
+        hits = []
+        for imp in self.world.impacts:
+            pieces = [p for p in imp.pieces if p is not None]
+            if not pieces:
+                continue
+            light = min(pieces, key=lambda p: p.body.mass)
+            dv = imp.impulse / light.body.mass / h
+            if dv < snd.impact_min_dv:
+                continue
+            bucket = size_bucket(light.radius / h, g.min_size, g.stretch_max_size)
+            volume = min(1.0, dv / snd.impact_full_dv)
+            hits.append(Hit(id(light), volume, imp.pos[0] / w, impact_name(light.kind, bucket)))
+        for hit in self.limiter.select(hits, self._t):
+            self.ctx.sfx.play(hit.name, hit.volume, hit.x)
+
+    def _on_grab(self, piece: Piece) -> None:
+        assert self.ctx is not None
+        self.ctx.sfx.play("grab", 1.0, self._x(piece.body.position.x))
+
+    def _on_throw(self, piece: Piece) -> None:
+        """Whoosh if the piece left fast enough to be a throw rather than a drop."""
+        assert self.ctx is not None
+        speed = math.hypot(*piece.body.velocity) / self.ctx.viewport.window_size[1]
+        if speed >= self.ctx.config.sound.throw_min_speed:
+            volume = 0.4 + 0.6 * min(1.0, speed / self.ctx.config.physics.max_speed)
+            self.ctx.sfx.play("throw", volume, self._x(piece.body.position.x))
+
+    def _inflate_sound(self) -> None:
+        """The rising tone follows the inflation of a new shape; a stretch has no tone."""
+        assert self.ctx is not None
+        inflating = {o for o, p in self.pending.items() if p.partner is None}
+        new = inflating - self._inflating
+        if new:
+            self.ctx.sfx.start_inflate(self._x(self.pending[next(iter(new))].pos[0]))
+        elif self._inflating and not inflating:
+            self.ctx.sfx.stop_inflate()
+        self._inflating = inflating
 
     # --- helpers ------------------------------------------------------------------------
     def _px(self, pos: tuple[float, float]) -> tuple[float, float]:
@@ -245,7 +310,8 @@ class GeometryScene:
             )
         if p.partner is not None:
             self._owner.pop(p.partner, None)
-        self.world.spawn(p.kind, p.pos, p.radius, vel=vel, angle=p.angle, hue=p.hue)
+        piece = self.world.spawn(p.kind, p.pos, p.radius, vel=vel, angle=p.angle, hue=p.hue)
+        self._on_throw(piece)
         assert self.ctx is not None
         n, h = self.ctx.config.effects.release_particles, self.ctx.viewport.window_size[1]
         self._emit(n, p.pos, p.hue, speed=(0.05 * h, 0.25 * h), life=(0.2, 0.45), size=0)
@@ -280,6 +346,7 @@ class GeometryScene:
                 self.pending[hid] = Pending(
                     kind, hue, e.t, self._px(e.pos), self._radius(0.0), chosen=chosen
                 )
+                self.ctx.sfx.play("spawn", 1.0, self._x(self._pinch[hid][0][0]))
             elif e.type == "pinch_move":
                 self._pinch[hid] = (self._px(e.pos), e.vel)
                 owner = self._owner.get(hid, hid)
@@ -316,6 +383,8 @@ class GeometryScene:
         self.play.update(dt)
         self.world.step(dt)
         self._sparks()
+        self._impact_sounds()
+        self._inflate_sound()
         self.particles.update(dt, gravity=0.5 * self.world.space.gravity.y)
 
     def draw(self, surface: pygame.Surface) -> None:

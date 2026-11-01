@@ -663,3 +663,133 @@ def test_effects_toggle_hides_glow_and_particles_but_not_feedback(scene, cfg):
     scene.effects_on = True
     scene.handle([ev("pinch_end", 2.5, pos=(0.6, 0.3), reason="released")], [])
     assert scene.particles.alive == cfg.effects.release_particles
+
+
+# --- A.5: sound effects ---------------------------------------------------------------------
+
+
+class FakeSfx:
+    """Records what the scene asks to play."""
+
+    def __init__(self):
+        self.played: list[tuple[str, float, float]] = []
+        self.inflating = False
+        self.inflate_starts = 0
+
+    def play(self, name, volume=1.0, x=0.5):
+        self.played.append((name, volume, x))
+
+    def start_inflate(self, x=0.5):
+        self.inflating = True
+        self.inflate_starts += 1
+
+    def stop_inflate(self):
+        self.inflating = False
+
+    def names(self):
+        return [n for n, _, _ in self.played]
+
+    def impacts(self):
+        return [p for p in self.played if p[0].startswith("impact.")]
+
+
+@pytest.fixture
+def sounds(scene):
+    fake = FakeSfx()
+    scene.ctx.sfx = fake
+    return fake
+
+
+def test_pinch_pops_inflates_and_a_slow_release_just_drops(scene, sounds):
+    scene.handle([ev("pinch_start", 0.0, pos=(0.2, 0.5))], [])
+    assert sounds.names() == ["spawn"] and sounds.played[0][2] < 0.5  # panned left
+    scene.update(1 / 60)
+    assert sounds.inflating and sounds.inflate_starts == 1
+    scene.handle([ev("pinch_end", 0.5, vel=(0.01, 0.0), reason="released")], [])
+    scene.update(1 / 60)
+    assert not sounds.inflating and "throw" not in sounds.names()
+
+
+def test_a_fast_release_whooshes(scene, sounds):
+    scene.handle([ev("pinch_start", 0.0), ev("pinch_end", 0.3, vel=(1.0, -0.5))], [])
+    (whoosh,) = [p for p in sounds.played if p[0] == "throw"]
+    assert 0.4 < whoosh[1] <= 1.0
+
+
+def test_a_lost_hand_drops_silently(scene, sounds):
+    scene.handle([ev("pinch_start", 0.0), ev("pinch_end", 0.3, vel=(2.0, 0.0), reason="lost")], [])
+    assert "throw" not in sounds.names()
+
+
+def test_stretching_stops_the_inflate_tone(scene, sounds):
+    scene.handle([ev("pinch_start", 0.0, hand=1, pos=(0.3, 0.4))], [])
+    scene.update(1 / 60)
+    assert sounds.inflating
+    scene.handle([ev("pinch_start", 0.1, hand=2, pos=(0.7, 0.4))], [])
+    scene.update(1 / 60)
+    assert not sounds.inflating and sounds.names().count("spawn") == 1
+
+
+def test_grabs_click_and_throws_from_a_grab_whoosh(scene, cfg, sounds):
+    fist = state(cfg, 1, 0, center=(0.4, 0.5))
+    scene.world.spawn("square", palm_px(scene, fist), 40)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    assert sounds.names() == ["grab"]
+    for i in range(20):
+        fist = state(cfg, 1, 0, center=(0.4 + 0.015 * (i + 1), 0.5))
+        scene.handle([], [fist])
+        scene.update(1 / 60)
+    opened = state(cfg, 1, 5, center=(0.7, 0.5))
+    scene.handle([fist_event("fist_end", opened, 1.0, reason="released")], [opened])
+    assert "throw" in sounds.names() and "spawn" not in sounds.names()
+
+
+def test_pinch_grab_clicks_instead_of_popping(scene, cfg, sounds):
+    pos = (0.5, 0.4)
+    scene.world.spawn("square", scene.ctx.viewport.to_px(*pos), 50)
+    scene.handle([ev("pinch_start", 0.0, pos=pos)], [state(cfg, 1, 5, pinching=True)])
+    assert sounds.names() == ["grab"]
+
+
+def test_two_fist_clear_sweeps(scene, cfg, sounds):
+    scene.world.spawn("circle", (640, 300), 30)
+    fists = [state(cfg, 1, 0, center=(0.3, 0.5)), state(cfg, 2, 0, center=(0.7, 0.5))]
+    for _ in range(round(cfg.geometry.clear_hold_s * 60) + 5):
+        scene.handle([], fists)
+        scene.update(1 / 60)
+    assert sounds.names().count("clear") == 1
+
+
+def test_a_hard_hit_sounds_with_the_shapes_timbre_and_size(scene, cfg, sounds):
+    scene.world.spawn("triangle", (300, 100), 0.03 * WINDOW[1], vel=(0, 1500))
+    for _ in range(60):
+        scene.update(1 / 60)
+    hits = sounds.impacts()
+    assert hits and hits[0][0] == "impact.triangle.0"  # smallest size: highest pitch
+    assert hits[0][1] == 1.0 and hits[0][2] < 0.5  # a hard hit, on the left
+
+
+def test_resting_shapes_are_quiet(scene, cfg, sounds):
+    piece = scene.world.spawn("square", (640, 600), 40)
+    for _ in range(240):
+        scene.update(1 / 60)
+    assert piece.body.is_sleeping
+    sounds.played.clear()
+    for _ in range(120):
+        scene.update(1 / 60)
+    assert sounds.played == []
+
+
+def test_a_collapsing_pile_is_capped_and_then_falls_silent(scene, cfg, sounds):
+    kinds = KINDS * 8
+    for i, kind in enumerate(kinds):  # 40 shapes dropped in a grid
+        x, y = 200 + 110 * (i % 8), 60 + 90 * (i // 8)
+        scene.world.spawn(kind, (x, y), 30 + 3 * (i % 5))
+    per_frame = []
+    for _ in range(6 * 60):
+        before = len(sounds.impacts())
+        scene.update(1 / 60)
+        per_frame.append(len(sounds.impacts()) - before)
+    assert max(per_frame) <= cfg.sound.max_impacts_per_frame
+    assert sum(per_frame[:120]) > 0  # the pile landing is heard...
+    assert sum(per_frame[-60:]) == 0  # ...and once it settles, it is quiet

@@ -114,3 +114,13 @@ impact_min_dv = 0.35      # sparks when a hit changes a shape's speed by more th
 impact_max_particles = 24 # sparks per impact at most (scaled by how hard the hit was)
 burst_particles = 30      # per shape when both fists clear the screen
 release_particles = 12    # small burst where a new shape is released
+
+[sound]
+enabled = true            # sound effects in Geometry; M mutes them (operator)
+volume = 0.7              # master volume, 0..1
+impact_min_dv = 0.3       # a hit must change a shape's speed by this much (window heights/s) to
+                          # make a sound, measured like the sparks; a settling pile stays quiet
+impact_full_dv = 2.0      # a hit this hard plays at full volume
+max_impacts_per_frame = 3 # loudest first
+piece_cooldown_s = 0.08   # a shape that just sounded stays quiet this long (no buzzing stacks)
+throw_min_speed = 0.8     # releases faster than this (window heights/s) whoosh; slower ones drop
