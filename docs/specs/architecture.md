@@ -100,9 +100,13 @@ ai-playground/                      (repo root)
 │   └── default.toml                all tunables; venue overrides via --config
 ├── assets/
 │   ├── models/                     gitignored; filled by scripts/fetch_models.py (pinned URL + SHA-256)
-│   └── fonts/ sounds/
+│   ├── charnet/                    our character CNN: weights .npz + model card .json (committed)
+│   └── fonts/
 ├── scripts/
-│   └── fetch_models.py
+│   ├── fetch_models.py
+│   └── eval_charnet.py             Air Writing accuracy on stroke files
+├── training/
+│   └── charnet/                    Colab training (PyTorch); its deps never enter uv.lock
 ├── src/ai_playground/
 │   ├── __main__.py                 CLI entry: `uv run ai-playground [--replay f] [--record f] [--scene s] ...`
 │   ├── app.py                      main loop, scene manager, hotkeys
@@ -111,11 +115,12 @@ ai-playground/                      (repo root)
 │   ├── sources/        camera.py  live.py (camera + recognizer worker)  replay.py  recorder.py  slot.py
 │   ├── tracking/       recognizer.py (the ONLY module importing mediapipe)  identity.py  filters.py
 │   ├── gestures/       features.py  detectors.py  engine.py            ◄ portable core
-│   ├── ml/             features.py  dataset.py  classifier.py  pca.py ◄ features.py, pca.py portable
+│   ├── ml/             strokes.py  charnet.py                           ◄ portable (Air Writing)
+│   │                   features.py  dataset.py  classifier.py  pca.py   (Train-a-Gesture, parked)
 │   ├── render/         viewport.py  overlay.py  hud.py  background.py  effects.py  text.py
 │   ├── physics/        world.py                                        (Phase A)
-│   ├── audio/          engine.py  voices.py  dsp.py  scales.py         (Phase B; scales.py portable)
-│   └── scenes/         base.py  attract.py  vision.py  geometry.py  train.py  synth.py  orchestra.py
+│   ├── audio/          sfx.py (Phase A)  engine.py  voices.py  dsp.py  scales.py  (Phase B; scales.py portable)
+│   └── scenes/         base.py  vision.py  geometry.py  writing.py  ·  later: attract.py  train.py  synth.py  orchestra.py
 ├── tests/
 │   ├── fixtures/                   *.jsonl landmark recordings (small, committed)
 │   ├── synthetic.py                build hands programmatically (pinch of distance d, fist, open palm…)
@@ -125,8 +130,8 @@ ai-playground/                      (repo root)
 
 ## 4. The portable core rule
 
-`gestures/`, `ml/features.py`, `ml/pca.py`, and `audio/scales.py` may import **only the standard
-library and NumPy**. A test parses their imports with `ast` and fails if this is broken.
+`gestures/`, `ml/strokes.py`, `ml/charnet.py`, `ml/features.py`, `ml/pca.py`, and `audio/scales.py`
+may import **only the standard library and NumPy**. A test parses their imports with `ast` and fails if this is broken.
 
 Why:
 
@@ -146,8 +151,8 @@ class Scene(Protocol):
     def draw(self, surface: pygame.Surface) -> None: ...
 ```
 
-`AppContext` holds the config, viewport, audio engine (once it exists), the trained custom-gesture
-model (shared between Train and Geometry), and a `switch_scene()` callback. The app draws the
+`AppContext` holds the config, viewport, sound effects (`Sfx`, Phase A), the audio engine (Phase B),
+the trained custom-gesture model (parked), and a `switch_scene()` callback. The app draws the
 **Vision overlay** on top of any scene when toggled. That is the "AI Vision Mode ↔ Magic Mode"
 switch from the brainstorm.
 
@@ -187,7 +192,9 @@ fast on unknown keys.
 ## 9. Dependencies
 
 Runtime: `mediapipe` (brings `opencv-contrib-python`, `numpy`, `sounddevice`), `pygame-ce`,
-`pymunk`, `scikit-learn`. Dev: `pytest`, `ruff`.
+`pymunk` (`scikit-learn` only once Train-a-Gesture returns). Dev: `pytest`, `ruff`.
+**Training only** (Colab, `training/charnet/requirements.txt`, never in `uv.lock`): `torch`, and
+what the training scripts need for data prep (PLAN D12).
 **Linux system package:** `libportaudio2` (the `sounddevice` wheels bundle PortAudio on macOS but
 not on Linux).
 

@@ -1,13 +1,18 @@
-# Phase A — Magic Geometry + Train-a-Gesture
+# Phase A — Magic Geometry + Air Writing
 
-**Outcome:** the first complete exhibit. Visitors:
-- create, throw, push, and grab glowing shapes that fall and collide;
+**Outcome:** the booth exhibit. Visitors:
+- create, throw, push, and grab glowing shapes that fall, collide, and **make sounds**;
 - reveal what the AI sees;
-- **teach the computer their own hand signs**, which then trigger effects in the shape world.
+- **write a character in the air and watch a neural network read it** ([Air Writing spec](phaseA-air-writing.md)).
 
-It runs unattended: an attract screen, onboarding hints, and touchless navigation.
+It runs with staff at the table: a booth-minimum shell keeps every scene tidy between visitors.
 
 Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
+
+> **Changed 2026-11-01 (PLAN D11, D14).** The event is a booth with people passing by, so demos
+> must pay off within seconds. **Train-a-Gesture (§5)** and the **attract screen and dwell
+> buttons (§6)** are parked, not deleted. Sound effects (§4) and the booth-minimum shell (§6) are
+> new. Air Writing has its own spec. Milestones in §7 are renumbered from A.5.
 
 ---
 
@@ -34,7 +39,7 @@ Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
 | **Fist near a shape** | **Grab:** shape attaches to the hand via a pivot joint. Opening the hand releases or throws it | Shape outline brightens, grab ring |
 | **Pinch on a shape** *(added in A.3)* | **Grab** by the pinch point; releasing the pinch drops or throws it. A pinch in empty space still creates a shape | Same as fist grab |
 | **Both fists held 1.5 s** | **Clear:** every shape bursts into particles | Progress ring around both fists |
-| **Custom gesture** (from Train scene) | Triggers its slot's effect (§5.6) | Slot icon flashes |
+| **Custom gesture** (from Train scene) *(parked)* | Triggers its slot's effect (§5.6) | Slot icon flashes |
 
 *Changed in A.3, from live testing and `recordings/grab_attempts`:*
 - **Natural grabs look like pinches.** A visitor grabbing a shape curls the fingers with the
@@ -89,7 +94,46 @@ Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
 - **Stretch goals (Level 3 from the brainstorm):** motion trails, shapes splitting on hard
   impacts, squares shattering into particles on the floor.
 
-## 5. Train-a-Gesture scene (`scenes/train.py`, `ml/`)
+### 4.1 Sound effects (`audio/sfx.py`) — *added 2026-11-01, PLAN D13*
+
+- `pygame.mixer` at 48 kHz stereo with a 512-sample buffer (~11 ms), 16 channels. Opened once by
+  the app; scenes get an `Sfx` object through `AppContext`.
+- **Sounds are synthesized with NumPy at startup** (fixed seed, < 100 ms total) and cached as
+  `pygame.mixer.Sound`. No sample files.
+- Volume and stereo pan are set per play with `Channel.set_volume(left, right)`; pan follows the
+  event's x position.
+
+| Event | Sound | Varies with |
+|-------|-------|-------------|
+| Spawn (pinch in empty space) | Soft "pop": short sine blip with a falling pitch | – |
+| Inflate (while held) | Quiet rising tone that follows the size, on one reserved channel; stops on release | Size |
+| Throw (release faster than `throw_min_speed`) | "Whoosh": band-passed noise burst | Release speed → volume |
+| Impact | Short struck tone. **Timbre from the shape** (circle: sine; triangle: bright, with harmonics; square and pentagon: woody, noise attack; bar: low knock) | **Pitch from size** (bigger = lower, 5 size buckets); **volume from impulse** |
+| Grab (fist or pinch) | Soft click | – |
+| Clear (two fists) | Falling sweep plus a noise burst | – |
+
+The bank is 5 shape types × 5 size buckets of impact sounds plus the five others: about 30
+sounds.
+
+**Impact limiter** (the 40-shape pile must not buzz):
+- ignore impulses below `min_impulse`;
+- at most `max_impacts_per_frame` (3) per frame, loudest first;
+- a per-piece cooldown of `piece_cooldown_s` (0.08 s), so shapes resting on each other stay quiet.
+
+**Robustness:** if the mixer cannot open (no audio device, CI), log one warning and run silently.
+Sound never crashes the exhibit. Tests run with `SDL_AUDIODRIVER=dummy`.
+
+**Config `[sound]`:** `enabled`, `volume`, `min_impulse`, `max_impacts_per_frame`,
+`piece_cooldown_s`, `throw_min_speed`. Operator key **`M`** toggles mute; the state shows in the
+keys overlay.
+
+*Relation to Phase C:* Physics Orchestra later makes collisions musical through the Phase B synth
+engine. These effects are a simpler precursor and may be replaced then.
+
+## 5. Train-a-Gesture scene (`scenes/train.py`, `ml/`) — *parked (PLAN D11)*
+
+> Parked on 2026-11-01: its ~60 s guided flow is too long for a booth. Air Writing is Phase A's
+> ML mode instead. This section is kept as written so it can be picked up later.
 
 ### 5.1 Concept
 
@@ -163,7 +207,20 @@ for later classroom use. It is off by default.
 
 ## 6. Exhibit shell
 
-**Attract scene** (`scenes/attract.py`)
+### 6.0 Booth-minimum shell — *the part built now (PLAN D14)*
+
+| Piece | Behavior |
+|-------|----------|
+| **Idle reset** | No hands for `idle_timeout` (20 s) → the current scene resets (Geometry: shapes fade out; Air Writing: ink and text line clear). The app stays in that scene; there is no attract screen |
+| **Hint line** | One short line at the bottom of each scene, contextual as in "Onboarding hints" below: each hint disappears once its action has been done and comes back after an idle reset |
+| **Operator keys** | `1` Vision · `2` Geometry · `3` Air Writing · `M` mute · `V` vision overlay · `H` HUD · `B` background · `C` clear · `F` fullscreen · `K` keys list |
+| **Quit** | **Hold `Esc` 2 s** (today `Esc` quits at once), so a curious visitor can't close the app |
+| **Fullscreen** | `--fullscreen` and `F` already exist; check both machines at the event resolution |
+
+Below, the **attract scene and dwell buttons are parked**. The onboarding hints are used by the
+hint line.
+
+**Attract scene** (`scenes/attract.py`) *(parked)*
 - Shapes fall in the background, with large text:
   *"Your hands are the controller. No keyboard. No mouse. Just artificial intelligence.
   Raise your hand to begin."*
@@ -178,7 +235,7 @@ for later classroom use. It is off by default.
 4. "Make a fist on a shape to grab it."
 5. "Push shapes with your open hand."
 
-**Touchless navigation: dwell buttons.** A small strip of buttons along the **top edge**, which a
+**Touchless navigation: dwell buttons** *(parked)*. A small strip of buttons along the **top edge**, which a
 hand rarely reaches by accident. Hover the palm cursor for 1.2 s; a fill ring shows progress.
 Buttons:
 - **👁 See what the AI sees** (toggles the Vision overlay from Phase 0)
@@ -194,21 +251,27 @@ Buttons:
 
 | # | Milestone | Done when |
 |---|-----------|-----------|
-| A.1 | Physics world; pinch → spawn, inflate, drop, throw; walls; body cap | Shapes fall, collide, and throw convincingly |
-| A.2 | Shape choice by finger count; two-hand stretch | Choice is reliable for 1/3/4/5 fingers in the fixture test |
-| A.3 | Hand paddle, fist grab, two-fist clear | Each action works for 2 new users without explanation |
-| A.4 | Visual polish: palette, glow, particles, preview, cursors | 60 FPS with 40 bodies and 1,500 particles on both machines |
-| A.5 | Train scene: capture flow, features, k-NN, rejection, test UI | 3 classes + "anything else" trained in < 60 s, ≥ 90 % live recognition |
-| A.6 | PCA map and data panel | Clusters are visible; live dot moves between them |
-| A.7 | Custom gesture → effects in Geometry | All three effects trigger from trained poses |
-| A.8 | Exhibit shell: attract, hints, dwell buttons, idle reset, hotkeys, fullscreen | Unattended loop works end to end |
-| A.9 | Test with ≥ 5 new users, 30-min soak test, Ubuntu laptop check, tag `v0.A` | PLAN §3 Phase A exit criteria met |
+| A.1 ✓ | Physics world; pinch → spawn, inflate, drop, throw; walls; body cap | Shapes fall, collide, and throw convincingly |
+| A.2 ✓ | Shape choice by finger count; two-hand stretch | Choice is reliable for 1/3/4/5 fingers in the fixture test |
+| A.3 ✓ | Hand paddle, fist grab, two-fist clear | Each action works for 2 new users without explanation |
+| A.4 ✓ | Visual polish: palette, glow, particles, preview, cursors | 60 FPS with 40 bodies and 1,500 particles on both machines |
+| A.5 | Sound effects (§4.1) | Every event in §4.1 sounds; a 40-shape pile stays quiet; 60 FPS kept; silent run without an audio device |
+| A.6 | Booth-minimum shell (§6.0) | Idle reset, hint line, hold-Esc quit, and `1`/`2`/`3`/`M` work in both scenes |
+| A.7 | Air Writing, milestones W.1–W.5 ([spec](phaseA-air-writing.md#10-milestones)) | Air Writing exit criteria in PLAN §3 met |
+| A.8 | Test with ≥ 5 new users, 30-min soak test, Ubuntu laptop check, tag `v0.A` | PLAN §3 Phase A exit criteria met |
+
+**Parked (PLAN D11, D14):** Train scene (capture flow, features, k-NN, rejection, test UI), PCA
+map and data panel, custom gestures → Geometry effects, attract scene, dwell buttons. These were
+the old A.5–A.7 and part of the old A.8.
 
 ## 8. Tests
 
 - **Physics, headless:** spawn → step → body is below its start; release velocity mapping; body
   cap and fade-out; kinematic hand body transfers momentum; impact list is filled on collision.
-- **ML:** feature invariances; k-NN on synthetic poses (separable → high accuracy); rejection of a
+- **Sound:** every synthesized sound is finite and within [−1, 1] with the expected length;
+  the impact limiter keeps the loudest 3 per frame and honors the per-piece cooldown; the app
+  runs when the mixer fails to open.
+- *(parked)* **ML:** feature invariances; k-NN on synthetic poses (separable → high accuracy); rejection of a
   far-away pose; overlap hint triggers for near-identical classes; `CustomGestureDetector`
   threshold, debounce, and cooldown.
 - **New fixtures:** `finger_count_1_to_5`, `grab_and_throw`, `two_hand_stretch`,
