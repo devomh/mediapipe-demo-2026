@@ -143,6 +143,12 @@ tail_trim_s = 0.15        # a fist closing while the pinch is still held also tr
 eraser_scale = 1.0        # eraser radius = this x the hand's palm length on screen
 area_size = 0.6           # side of the faint writing box in the middle (a guide only)
 background_brightness = 0.25
+# Framing: strokes -> the network's 28x28 input (spec §4). Training uses the same values, so
+# change them only together with the model (W.3 tunes raster_width against EMNIST).
+raster_width = 0.1        # line width, as a fraction of the character's larger side
+ink_threshold = 0.1       # pixels above this count as ink when cropping
+fill = 0.857              # the character spans this much of the frame (EMNIST: 24 of 28 px)
+writer = "w1"             # collect mode (T) labels its samples with this
 
 [booth]
 idle_timeout_s = 20.0     # no hands for this long -> the current scene resets (0 = never)

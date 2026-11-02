@@ -305,3 +305,32 @@ def test_fixture_strokes_end_without_hooks(cfg):
     untrimmed = [end_travel(s) for ch in raw for s in ch]
     assert max(trimmed) <= 0.03, trimmed
     assert sum(t > 0.03 for t in untrimmed) >= 4, untrimmed  # the fixture does have hooks
+
+
+# --- W.2: what the AI sees, collect mode ---------------------------------------------------------
+def test_a_read_frames_the_ink_for_the_network(scene, cfg):
+    write(scene, (0.5, 0.3), (0.5, 0.7))
+    hold(scene, [state(cfg, 1, 0)], cfg.writing.read_hold_s + 0.05)
+    x = scene.last_input
+    assert x.shape == (28, 28) and x.max() == 1.0
+    scene.clear()
+    assert scene.last_input is None
+
+
+def test_collect_mode_saves_each_read_with_the_prompted_label(scene, cfg, tmp_path, monkeypatch):
+    from ai_playground.ml.strokes import read_samples
+
+    monkeypatch.chdir(tmp_path)
+    scene.toggle_collect()
+    c = scene.collector
+    assert c is not None and c.path.parent == Path("recordings/strokes")
+    asked = c.target[0]
+    write(scene, (0.5, 0.3), (0.5, 0.7))
+    hold(scene, [state(cfg, 1, 0)], cfg.writing.read_hold_s + 0.05)
+    assert [s.label for s in read_samples(c.path)[1]] == [asked]
+    assert scene.hint() == f"Saved {asked}"
+    scene.draw(scene.surface)  # the prompt panel, and the "what the AI sees" grid
+    scene.redo_last()
+    assert c.target[0] == asked and read_samples(c.path)[1] == []
+    scene.toggle_collect()
+    assert scene.collector is None

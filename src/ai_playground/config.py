@@ -181,6 +181,10 @@ class WritingConfig:
     eraser_scale: float
     area_size: float
     background_brightness: float
+    raster_width: float
+    ink_threshold: float
+    fill: float
+    writer: str
 
 
 @dataclass(frozen=True, slots=True)

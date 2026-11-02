@@ -88,9 +88,12 @@ are parked. Their spec sections stay in place for later.
 
 - A first-time user (someone not on the team) creates and throws a shape within 10 s, unprompted.
 - A first-time user gets a character read within 30 s, with at most a one-line hint.
-- Air Writing accuracy on the committed air-written evaluation set (digits + uppercase, several
-  writers): ≥ 90 % top-1 and ≥ 97 % top-3. *Provisional:* revisit once the first model is measured
-  (Air Writing W.3).
+- Air Writing accuracy on the committed air-written evaluation set (digits + uppercase):
+  ≥ 90 % top-1 and ≥ 97 % top-3. *Provisional:* revisit once the first model is measured
+  (Air Writing W.3). *Changed in W.2:* the set has one writer in three styles (108 characters,
+  [Air Writing §8](specs/phaseA-air-writing.md#8-air-written-data-evaluation-and-fine-tuning)),
+  so it is reported with a confidence interval, and the A.8 user tests add a multi-writer
+  figure by logging whether each read was right.
 - 30-minute soak test with no crash and no frame-rate degradation.
 
 ### Phase B — AirSynth · [spec](specs/phaseB-airsynth.md)
@@ -136,6 +139,7 @@ operations checklist.
 | macOS camera permission or wrong camera index on event day | Medium | Startup check with clear on-screen error; `--list-cameras`; ops checklist |
 | Gestures feel unreliable for new users | Medium | Small gesture vocabulary, hysteresis, onboarding hints, test with new users at every phase |
 | Air-written characters look unlike EMNIST's pen scans (wobbly, even stroke width, slanted), so accuracy drops | High | One framing function shared by training and the app; augmentation that imitates air-writing; measure on our own air-written set before building the UI polish; fine-tune on it if needed ([Air Writing §5](specs/phaseA-air-writing.md#5-model)) |
+| The evaluation set has one writer (W.2), so it may overstate accuracy for visitors | Medium | Three writing styles per character, a confidence interval with every accuracy, and a multi-writer figure from the A.8 user tests ([Air Writing §8](specs/phaseA-air-writing.md#8-air-written-data-evaluation-and-fine-tuning)) |
 | Booth noise drowns the sound effects, or they annoy the neighbouring booths | Medium | Volume in config, `M` mutes, test with the event speakers |
 | MediaPipe API change in a future release | Low | Version pinned in `uv.lock`; MediaPipe is called from one module only (`tracking/recognizer.py`) |
 | Ubuntu laptop missing system libraries (PortAudio) | Medium | `sudo apt install libportaudio2` in README; startup check. Needed from Phase 0: `import mediapipe` imports `sounddevice` |
