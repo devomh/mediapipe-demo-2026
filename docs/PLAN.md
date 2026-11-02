@@ -84,6 +84,25 @@ mute, operator hotkeys).
 *Changed 2026-11-01 (D11, D14):* Train-a-Gesture, the attract screen, and dwell-button navigation
 are parked. Their spec sections stay in place for later.
 
+**Where we are (2026-11-02)**
+
+- Done: A.1–A.6 (Geometry, sound, UI scaling, booth shell) and Air Writing W.1–W.4 (drawing,
+  framing and collect mode, `charnet_v1` trained in Colab, reading screen). Milestone tables:
+  [Geometry §7](specs/phaseA-magic-geometry.md#7-milestones),
+  [Air Writing §10](specs/phaseA-air-writing.md#10-milestones).
+- `charnet_v1`: 90.7 % top-1 (95 % CI 84–95 %) and 100 % top-3 on the one-writer `eval_v1`;
+  most misses are I/1 and O/0, which the look-alike display covers
+  ([Air Writing §5.4.1](specs/phaseA-air-writing.md)).
+- **Next:** A.8. Before the user tests, add a staff key that marks each read right or wrong and
+  logs it (strokes and labels only, D8), to get the multi-writer accuracy figure
+  ([Air Writing §8](specs/phaseA-air-writing.md#8-air-written-data-evaluation-and-fine-tuning)).
+  Then: ≥ 5 new users on both scenes, the 30-minute soak test, the Ubuntu laptop check, tag
+  `v0.A`.
+- **W.5** (accuracy work: re-stroke augmentation, fine-tuning on a separate collection) only if
+  the user tests show visitors' writing being misread. W.6 (live guess) is a stretch.
+- Retraining: `training/charnet/README.md` has the exact Colab CLI steps (EMNIST must be
+  downloaded in a browser; the CLI needs `--auth=adc`).
+
 **Exit criteria**
 
 - A first-time user (someone not on the team) creates and throws a shape within 10 s, unprompted.

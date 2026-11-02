@@ -285,7 +285,7 @@ Buttons:
 | A.4 ✓ | Visual polish: palette, glow, particles, preview, cursors | 60 FPS with 40 bodies and 1,500 particles on both machines |
 | A.5 ✓ | Sound effects (§4.1) | Every event in §4.1 sounds; a 40-shape pile stays quiet; 60 FPS kept; silent run without an audio device |
 | A.6 ✓ | Booth-minimum shell (§6.0) | Idle reset, hint line, hold-Esc quit, and `1`/`2`/`3`/`M` work in both scenes |
-| A.7 | Air Writing, milestones W.1–W.5 ([spec](phaseA-air-writing.md#10-milestones)) | Air Writing exit criteria in PLAN §3 met |
+| A.7 | Air Writing, milestones W.1–W.5 ([spec](phaseA-air-writing.md#10-milestones)). *W.1–W.4 ✓; W.5 only if the A.8 user tests call for it* | Air Writing exit criteria in PLAN §3 met |
 | A.8 | Test with ≥ 5 new users, 30-min soak test, Ubuntu laptop check, tag `v0.A` | PLAN §3 Phase A exit criteria met |
 
 **Parked (PLAN D11, D14):** Train scene (capture flow, features, k-NN, rejection, test UI), PCA
