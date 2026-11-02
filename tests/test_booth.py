@@ -100,6 +100,7 @@ def test_hint_line_settles_then_fades_in_and_cross_fades():
 def test_vision_hints():
     s = VisionScene()
     assert s.hint().startswith("Raise your hand")
+
     class Visible:
         visible = True
 
