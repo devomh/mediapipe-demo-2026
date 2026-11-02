@@ -13,6 +13,7 @@ PKG = Path(__file__).resolve().parents[1] / "src" / "ai_playground"
 PORTABLE = [
     *sorted((PKG / "gestures").glob("*.py")),
     PKG / "ml" / "strokes.py",
+    PKG / "ml" / "charnet.py",
     PKG / "ml" / "features.py",
     PKG / "ml" / "pca.py",
     PKG / "audio" / "scales.py",

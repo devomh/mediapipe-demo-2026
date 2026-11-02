@@ -131,7 +131,11 @@ little gain at a booth.
 - **Orientation:** EMNIST's raw files store images transposed. Fix it and **look at a grid of
   samples per class** before training.
 - **Source and integrity:** NIST's download has been unreliable at times. Pin whichever source is
-  used (URL + SHA-256) in the script and record it in the model card.
+  used (URL + SHA-256) in the script and record it in the model card. *W.3:* NIST's server
+  refuses scripted downloads (HTTP 403), so `gzip.zip` is downloaded in a browser and passed to
+  `prepare_data.py --zip`, which checks the MD5 torchvision publishes
+  (`58c8d27c78d21e728a6bc7b3cc06412e`; SHA-256 `fb9bb67e…cda8e`). The 36 classes: 533,993 train
+  images (fewest: K, 2,468), 89,264 test.
 - **Splits:** EMNIST's own test set measures clean accuracy. The real measure is our own
   air-written set (§8), which is never used for training except through a separate fine-tuning
   split.
@@ -147,13 +151,17 @@ on the GPU per batch, before `frame_image`:
 | Shear | ±0.3 | Slanted writing |
 | Scale, anisotropic | 0.8–1.15 per axis | Squashed or stretched letters |
 | Elastic distortion | small α, σ | Hand tremor, wobbly lines |
-| **Re-stroke** (p = 0.5) | thickness 0.06–0.14 of the box | Skeletonize the glyph, then redraw it at an even random thickness: our ink has constant width, a pen scan doesn't |
+| **Re-stroke** (p = 0.5) | thickness 0.06–0.14 of the box | Skeletonize the glyph, then redraw it at an even random thickness: our ink has constant width, a pen scan doesn't. *Not in v1:* per-image skeletonizing is CPU work that would slow training a lot. v1 thickens or thins the line instead (max-pool dilation/erosion, 3 or 5 px at 112 px, p = 0.6). Add it in W.5 if line width turns out to matter |
+| *Crisp edges* (p = 0.5) *(added in W.3)* | contrast ×2.5 around 0.3 | EMNIST glyphs are blurred scans; our ink has a 1-pixel anti-aliased edge (the framing grid shows the difference) |
 | Gaps (p = 0.15) | 1–2 short gaps | Partial erasing; a pinch released early |
 
 **Framing check** (`training/charnet/compare_framing.py`, run in Colab): a grid with our framed
 air-written samples next to framed EMNIST samples of the same class, plus the mean ink fraction
 per image for both. Thickness and placement should look the same before training starts. This is
-also how `raster_width` (§4) is tuned.
+also how `raster_width` (§4) is tuned. *W.3:* the batched training framing matches the app's
+`frame_image` within 6e-8 on 1,800 EMNIST glyphs; mean ink is 0.177 for EMNIST and 0.158 / 0.183
+for ours at `raster_width` 0.10 / 0.12, so **`raster_width` = 0.12**. Placement and size match
+in the grid; EMNIST's edges are softer (hence the crisp-edge augmentation).
 
 ### 5.4 Architecture and training (`training/charnet/train.py`)
 
@@ -175,6 +183,29 @@ flatten 1152 → dense 256 → ReLU → dropout 0.4 → dense 36
   something. Stored in the weights file.
 - The architecture is a starting point. Changes are judged on the **air-written** set, not on
   EMNIST test accuracy.
+
+### 5.4.1 Results: charnet_v1 *(W.3, 2026-11-01)*
+
+Colab T4, 20 epochs × 1,500 batches of 256, 18 minutes. The epoch was chosen on held-out EMNIST
+(epoch 19, 93.1 %); temperature 0.65 (label smoothing leaves the raw softmax underconfident).
+Full numbers in `assets/charnet/charnet_v1.json`.
+
+| | top-1 | top-3 |
+|---|---|---|
+| EMNIST test, 36 classes (89,264) | 93.3 % | 99.9 % |
+| Air-written `eval_v1` (108, one writer) | **90.7 %** (98/108; 95 % CI 84–95 %) | **100 %** |
+
+- **Air-written misses:** I→1 ×3 and O→0 ×3 (this writer's I and O have no serifs or shape that
+  separates them from 1 and 0), 6→G ×2, 1→7 (a 1 with a flag), 1→9 (fast style). Leaving out
+  the look-alike pairs: 98/102. By style: natural 89 %, fast 92 %, other hand 92 %.
+- **EMNIST's own look-alikes** dominate its errors too: O→0 1,539, 0→O 1,303, 1↔I ~740 each,
+  5→S 326, 2→Z 284. Its weakest classes are O (62 %), I (63 %), 0 (75 %), 1 (88 %).
+- **For W.4:** the second guess in the six I/O misses had p = 0.12–0.25, so `confusable_p` = 0.25
+  (§5.6) would show "1 or I?" for only one of them. Lower it (≈ 0.1) for the listed pairs.
+- Air-written accuracy moved between 87 % and 92 % from epoch to epoch (±1–2 characters):
+  differences that small between models can't be told apart on this set.
+- NumPy inference matches PyTorch within 2.4e-6 (fixture: 1e-4 tolerance) and takes 1.7 ms per
+  read on the Ubuntu desktop.
 
 ### 5.5 Export and NumPy inference (`training/charnet/export.py`, `ml/charnet.py`)
 
@@ -290,7 +321,7 @@ the app.
 |---|-----------|-----------|
 | W.1 ✓ | Drawing: pinch ink, resampling, armed eraser, tail trim, read ring (no model yet), two-fist clear, idle reset. Landmark fixture `air_write_digits` | Characters look clean; no stray marks or hooks when making a fist (fixture test) |
 | W.2 | `render_strokes` + `frame_image`; collect mode; record the evaluation set (one writer, 3 styles, 108 characters; §8) | Evaluation set committed; our framed images look plausible (the side-by-side with EMNIST is W.3's `compare_framing`, which needs the dataset) |
-| W.3 | Colab: data prep, framing check, augmentation, training, export; NumPy inference + parity test | NumPy matches PyTorch within 1e-4; EMNIST test and air-written accuracy reported in the model card; PLAN accuracy targets confirmed or revised |
+| W.3 ✓ | Colab: data prep, framing check, augmentation, training, export; NumPy inference + parity test | NumPy matches PyTorch within 1e-4; EMNIST test and air-written accuracy reported in the model card; PLAN accuracy targets confirmed or revised |
 | W.4 | Reading UI: result, top-3 bars, "what the AI sees" grid and shrink animation, look-alike pairs, text line, hints | A new user gets a character read within 30 s |
 | W.5 | Accuracy iteration: framing, augmentation, fine-tuning if needed; accuracy floor test | PLAN §3 Air Writing exit criteria met |
 | W.6 | *Stretch:* live guess while writing (top-3 updating every ~200 ms); a small word list that corrects the text line | – |

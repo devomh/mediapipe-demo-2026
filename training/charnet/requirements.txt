@@ -1,0 +1,5 @@
+# CharNet training (Colab). Never added to uv.lock: the app only needs NumPy at runtime.
+# Colab's GPU runtime ships these; the versions used for charnet_v1 are in its model card.
+torch>=2.3
+numpy>=1.26
+pillow>=10

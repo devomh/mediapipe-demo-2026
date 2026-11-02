@@ -89,8 +89,9 @@ are parked. Their spec sections stay in place for later.
 - A first-time user (someone not on the team) creates and throws a shape within 10 s, unprompted.
 - A first-time user gets a character read within 30 s, with at most a one-line hint.
 - Air Writing accuracy on the committed air-written evaluation set (digits + uppercase):
-  ≥ 90 % top-1 and ≥ 97 % top-3. *Provisional:* revisit once the first model is measured
-  (Air Writing W.3). *Changed in W.2:* the set has one writer in three styles (108 characters,
+  ≥ 90 % top-1 and ≥ 97 % top-3. *Confirmed in W.3:* charnet_v1 reads 90.7 % top-1 (95 % CI
+  84–95 %) and 100 % top-3; six of its ten misses are I/1 and O/0 look-alikes, which W.4's
+  look-alike display handles ([Air Writing §5.4.1](specs/phaseA-air-writing.md)). *Changed in W.2:* the set has one writer in three styles (108 characters,
   [Air Writing §8](specs/phaseA-air-writing.md#8-air-written-data-evaluation-and-fine-tuning)),
   so it is reported with a confidence interval, and the A.8 user tests add a multi-writer
   figure by logging whether each read was right.
