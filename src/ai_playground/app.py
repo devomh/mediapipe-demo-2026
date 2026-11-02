@@ -26,6 +26,7 @@ from ai_playground.render.viewport import Viewport
 from ai_playground.scenes.base import AppContext, Scene
 from ai_playground.scenes.geometry import GeometryScene
 from ai_playground.scenes.vision import VisionScene
+from ai_playground.scenes.writing import WritingScene
 from ai_playground.sources.recorder import Recorder, default_path
 from ai_playground.sources.slot import LatestSlot
 from ai_playground.tracking.identity import HandTracker
@@ -33,9 +34,13 @@ from ai_playground.types import HandFrame
 
 log = logging.getLogger(__name__)
 
-SCENES: dict[str, Callable[[], Scene]] = {"vision": VisionScene, "geometry": GeometryScene}
-# Operator scene keys (spec §6.0). `3` becomes Air Writing when that scene exists (W.1).
-SCENE_KEYS = {pygame.K_1: "vision", pygame.K_2: "geometry"}
+SCENES: dict[str, Callable[[], Scene]] = {
+    "vision": VisionScene,
+    "geometry": GeometryScene,
+    "writing": WritingScene,
+}
+# Operator scene keys (Phase A spec §6.0).
+SCENE_KEYS = {pygame.K_1: "vision", pygame.K_2: "geometry", pygame.K_3: "writing"}
 
 
 class Source(Protocol):
@@ -199,7 +204,7 @@ class App:
             Hotkey(
                 (pygame.K_c,),
                 "C",
-                "Clear shapes",
+                "Clear (shapes, ink)",
                 lambda _k: self.scene.clear(),
                 available=lambda: hasattr(self.scene, "clear"),
             ),

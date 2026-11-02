@@ -170,6 +170,20 @@ class SoundConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WritingConfig:
+    ink_width: float
+    resample_step: float
+    min_char_size: float
+    read_hold_s: float
+    tail_trim_s: float
+    release_ratio: float
+    release_trim_max_s: float
+    eraser_scale: float
+    area_size: float
+    background_brightness: float
+
+
+@dataclass(frozen=True, slots=True)
 class BoothConfig:
     idle_timeout_s: float
     hints: bool
@@ -188,6 +202,7 @@ class Config:
     geometry: GeometryConfig
     effects: EffectsConfig
     sound: SoundConfig
+    writing: WritingConfig
     booth: BoothConfig
 
     def model_path(self) -> Path:

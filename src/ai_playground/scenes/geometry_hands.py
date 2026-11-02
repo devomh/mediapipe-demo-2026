@@ -22,6 +22,7 @@ from ai_playground.config import GeometryConfig
 from ai_playground.gestures.engine import HandState
 from ai_playground.physics.world import Piece, World
 from ai_playground.render.viewport import Viewport
+from ai_playground.scenes.hand_rules import HoldTrigger, PalmArming
 from ai_playground.types import GestureEvent
 
 
@@ -51,8 +52,7 @@ class HandPlay:
         self.fist_pos: dict[int, tuple[float, float]] = {}  # px, hands currently in a fist
         # hand -> (palm px, paddle radius px, 0..1) while an open palm arms into a paddle
         self.arming: dict[int, tuple[tuple[float, float], float, float]] = {}
-        self.clear_progress = 0.0  # 0..1 while both fists are held
-        self._clear_latched = False  # one clear per double-fist; open a hand to re-arm
+        self.clear_hold = HoldTrigger(cfg.clear_hold_s)  # one clear per double-fist
         self.grabs = 0  # total grabs, for tests and diagnostics
         self.throws: list[float] = []  # speed (px/s) of each release, for tests and diagnostics
         self._t = 0.0
@@ -60,8 +60,12 @@ class HandPlay:
         # start to open (MediaPipe label lag + debounce), when a throwing hand is already
         # slowing down, so a throw uses the fastest velocity from the last `throw_lookback_s`.
         self._vel: dict[int, deque[tuple[float, float, float]]] = {}
-        self._pinch_end: dict[int, float] = {}  # hand id -> time of its last pinch_end
-        self._palm_since: dict[int, float] = {}  # hand id -> when its open palm started arming
+        self._arming = PalmArming(cfg.paddle_hold_s, cfg.paddle_after_pinch_s)
+
+    @property
+    def clear_progress(self) -> float:
+        """0..1 while both fists are held."""
+        return self.clear_hold.progress
 
     @property
     def held(self) -> dict[int, Piece]:
@@ -114,7 +118,7 @@ class HandPlay:
 
     def _drop_hand(self, hand_id: int) -> None:
         self.grabbed.pop(hand_id, None)
-        self._palm_since.pop(hand_id, None)
+        self._arming.stop(hand_id)
         self.world.remove_hand(hand_id)
 
     # --- per frame ----------------------------------------------------------------------
@@ -126,10 +130,10 @@ class HandPlay:
             if g is not None and e.type == f"{g.by}_end":
                 self._release(e.hand_id, lost=e.data.get("reason") == "lost")
             if e.type == "hand_exit":
-                self._pinch_end.pop(e.hand_id, None)
+                self._arming.forget(e.hand_id)
                 self._drop_hand(e.hand_id)
             elif e.type == "pinch_end":
-                self._pinch_end[e.hand_id] = self._t
+                self._arming.pinch_ended(e.hand_id, self._t)
 
         # 2. Every visible hand: anchor (holding or fist), paddle (armed open palm), or nothing.
         present = set()
@@ -143,15 +147,17 @@ class HandPlay:
             if s.fist:
                 self.fist_pos[s.id] = palm
             if g is not None and g.by == "pinch":
-                self._palm_since.pop(s.id, None)
+                self._arming.stop(s.id)
                 w.set_hand(s.id, self._px(s.features.pinch_point))
             elif s.fist:
-                self._palm_since.pop(s.id, None)
+                self._arming.stop(s.id)
                 w.set_hand(s.id, palm)  # anchor, so a fist grab has something to hang from
-            elif s.palm and not s.pinching and not self.busy(s.id) and self._settled(s.id):
-                since = self._palm_since.setdefault(s.id, self._t)
-                hold = self.cfg.paddle_hold_s
-                frac = (self._t - since) / hold if hold > 0 else 1.0
+            elif (
+                s.palm
+                and not s.pinching
+                and not self.busy(s.id)
+                and (frac := self._arming.update(s.id, self._t)) is not None
+            ):
                 radius = self._paddle_radius(s)
                 if frac >= 1.0:
                     w.set_hand(s.id, palm, radius=radius)
@@ -167,11 +173,6 @@ class HandPlay:
         for e in events:
             if e.type == "fist_start" and e.hand_id in w.hands:
                 self.try_grab(e.hand_id, self._px(e.pos), "fist")
-
-    def _settled(self, hand_id: int) -> bool:
-        """Long enough since this hand's last pinch for the new shape to fall clear."""
-        t = self._pinch_end.get(hand_id)
-        return t is None or self._t - t >= self.cfg.paddle_after_pinch_s
 
     def _peak_velocity(self, hand_id: int) -> tuple[float, float] | None:
         samples = self._vel.pop(hand_id, None)
@@ -189,21 +190,14 @@ class HandPlay:
             samples.append((self._t, v.x, v.y))
             while samples and self._t - samples[0][0] > self.cfg.throw_lookback_s:
                 samples.popleft()
-        if len(self.fist_pos) >= 2:
-            if not self._clear_latched:
-                self.clear_progress = min(1.0, self.clear_progress + dt / self.cfg.clear_hold_s)
-                if self.clear_progress >= 1.0:
-                    self._clear_latched = True
-                    self.grabbed.clear()
-                    self.on_clear()
-        else:
-            self.clear_progress = 0.0
-            self._clear_latched = False
+        if self.clear_hold.update(dt, len(self.fist_pos) >= 2):
+            self.grabbed.clear()
+            self.on_clear()
 
     def reset(self) -> None:
         for hid in list(self.world.hands):
             self.world.remove_hand(hid)
         self.grabbed.clear()
         self.fist_pos, self.arming = {}, {}
-        self._palm_since.clear()
-        self.clear_progress = 0.0
+        self._arming.reset()
+        self.clear_hold.reset()

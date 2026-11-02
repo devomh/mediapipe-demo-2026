@@ -127,6 +127,23 @@ max_impacts_per_frame = 3 # loudest first
 piece_cooldown_s = 0.08   # a shape that just sounded stays quiet this long (no buzzing stacks)
 throw_min_speed = 0.8     # releases faster than this (window heights/s) whoosh; slower ones drop
 
+[writing]
+# Air Writing. Lengths in window heights. The eraser arms like the paddle (paddle_hold_s,
+# paddle_after_pinch_s) and two fists clear after clear_hold_s, both from [geometry].
+ink_width = 0.012
+resample_step = 0.004     # ink points are placed this far apart, whatever the drawing speed
+min_char_size = 0.08      # smaller ink isn't read: "Write it bigger"
+read_hold_s = 0.3         # hold one fist this long to read the ink
+release_ratio = 0.35      # pen-up drops the ink drawn after the pinch ratio rose above this:
+                          # opening fingers (or curling into a fist) drag the pinch point
+                          # 0.03-0.08 window heights in the last 2-4 frames (air_write_digits)
+release_trim_max_s = 0.25 # ...but never more than this, so a loosely held pinch keeps its ink
+tail_trim_s = 0.15        # a fist closing while the pinch is still held also trims this much:
+                          # the fist label lags the curling fingers by 70-130 ms
+eraser_scale = 1.0        # eraser radius = this x the hand's palm length on screen
+area_size = 0.6           # side of the faint writing box in the middle (a guide only)
+background_brightness = 0.25
+
 [booth]
 idle_timeout_s = 20.0     # no hands for this long -> the current scene resets (0 = never)
 hints = true              # one onboarding line at the bottom; each hint goes once it's been done

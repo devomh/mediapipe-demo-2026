@@ -146,3 +146,20 @@ def test_m_mutes_sound_and_is_hidden_without_it(cfg, clip):
         app._on_key(pygame.K_m)  # no crash
     finally:
         pygame.quit()
+
+
+def test_key_3_opens_air_writing_and_c_clears_its_ink(cfg, clip):
+    pygame.init()
+    try:
+        app = App(cfg, ReplaySource(clip), RunOptions(scene="vision", max_frames=1))
+        app._on_key(pygame.K_3)
+        assert app.scene.name == "writing" and not app.overlay.visible
+        app.scene._pen_down(1, (0.5, 0.5), 0.0)
+        app.scene._pen_up(1, 0.1)  # a tap: too short to keep
+        assert app.scene.ink == []
+        hk = next(h for h in app.hotkeys if h.label == "C")
+        assert hk.is_available()
+        app._on_key(pygame.K_c)
+        assert app.run() == 0
+    finally:
+        pygame.quit()
