@@ -226,7 +226,8 @@ Full numbers in `assets/charnet/charnet_v1.json`.
 
 Some pairs are ambiguous even to people: **O/0, I/1, Z/2, S/5, B/8, G/6, D/0, Q/O, T/7**.
 - If the top two guesses are a pair from `confusable_pairs` and the second has probability
-  ≥ `confusable_p` (0.25), show both: **"0 or O?"** with the subtitle *"These look alike to the
+  ≥ `confusable_p` (0.1; *was 0.25, lowered in W.4* so it catches charnet_v1's I/1 and O/0
+  misses, whose second guess had 0.12–0.25), show both: **"0 or O?"** with the subtitle *"These look alike to the
   AI — and to people!"* This is a teaching moment, not a failure.
 - The text line takes the top guess.
 
@@ -245,12 +246,23 @@ Some pairs are ambiguous even to people: **O/0, I/1, Z/2, S/5, B/8, G/6, D/0, Q/
 - **Bottom:** the hint line (booth shell).
 - The Vision overlay (`V`) works on top, as in every scene.
 
+*As built (W.4):* `render/reading.py` draws the panel (title "The AI reads", the answer or the
+pair with its note, three bars with percentages, the grid with faint lines between the 784
+pixels and the caption "28 x 28 = 784 numbers") and the text line (monospace, newest character
+fading in). On a read the ink flies into the grid over 0.4 s, framed as the network frames it,
+while the grid fills in; then the answer and the bars come in over 0.3 s. The model is loaded
+once (`[writing] model`) and the app frames with the parameters stored in the weights file. If
+the file is missing, a read falls back to W.1/W.2's "You wrote" panel. Collect mode stores what
+the model read in each sample's `meta`. On the `air_write_digits` fixture the scene reads
+"147AE", end to end from hand landmarks (a test).
+
 ## 7. Configuration `[writing]`
 
 `ink_width`, `resample_step`, `min_char_size`, `read_hold_s`, `release_ratio`,
 `release_trim_max_s`, `tail_trim_s`, `eraser_scale`, `area_size`, `background_brightness`
-*(W.1)*, `raster_width`, `ink_threshold`, `fill`, `writer` *(W.2)*, then `ink_threshold`, `fill`, `confusable_pairs`, `confusable_p`,
-`text_max`, `model` (path to the `.npz`). The eraser reuses `paddle_hold_s` and
+*(W.1)*, `raster_width`, `ink_threshold`, `fill`, `writer` *(W.2)*, `model` (path to the
+`.npz`), `confusable_pairs` (space-separated pairs, e.g. `"O0 I1"`), `confusable_p`, `text_max`
+*(W.4)*. The eraser reuses `paddle_hold_s` and
 `paddle_after_pinch_s`; the clear reuses `clear_hold_s`.
 
 ## 8. Air-written data: evaluation and fine-tuning
@@ -298,6 +310,7 @@ Some pairs are ambiguous even to people: **O/0, I/1, Z/2, S/5, B/8, G/6, D/0, Q/
 | `src/ai_playground/scenes/writing.py` | Scene: gestures → ink, read, UI |
 | `src/ai_playground/scenes/hand_rules.py` | `PalmArming` and `HoldTrigger`, shared with Geometry's paddle and clear |
 | `src/ai_playground/render/ink.py` | Ink with glow, the writing area, the "You wrote" thumbnail (W.1 stand-in for the result panel) |
+| `src/ai_playground/render/reading.py` | The result panel, the text line, the shrink into the grid, look-alike pairs (W.4) |
 | `src/ai_playground/ml/strokes.py` | Resample, erase, `render_strokes`, `frame_image` (portable core) |
 | `src/ai_playground/ml/charnet.py` | NumPy CNN inference (portable core) |
 | `assets/charnet/charnet_v1.npz`, `.json` | Weights and model card (committed) |
@@ -322,7 +335,7 @@ the app.
 | W.1 ✓ | Drawing: pinch ink, resampling, armed eraser, tail trim, read ring (no model yet), two-fist clear, idle reset. Landmark fixture `air_write_digits` | Characters look clean; no stray marks or hooks when making a fist (fixture test) |
 | W.2 | `render_strokes` + `frame_image`; collect mode; record the evaluation set (one writer, 3 styles, 108 characters; §8) | Evaluation set committed; our framed images look plausible (the side-by-side with EMNIST is W.3's `compare_framing`, which needs the dataset) |
 | W.3 ✓ | Colab: data prep, framing check, augmentation, training, export; NumPy inference + parity test | NumPy matches PyTorch within 1e-4; EMNIST test and air-written accuracy reported in the model card; PLAN accuracy targets confirmed or revised |
-| W.4 | Reading UI: result, top-3 bars, "what the AI sees" grid and shrink animation, look-alike pairs, text line, hints | A new user gets a character read within 30 s |
+| W.4 ✓ *(built; the 30 s check is part of the A.8 user tests)* | Reading UI: result, top-3 bars, "what the AI sees" grid and shrink animation, look-alike pairs, text line, hints | A new user gets a character read within 30 s |
 | W.5 | Accuracy iteration: framing, augmentation, fine-tuning if needed; accuracy floor test | PLAN §3 Air Writing exit criteria met |
 | W.6 | *Stretch:* live guess while writing (top-3 updating every ~200 ms); a small word list that corrects the text line | – |
 

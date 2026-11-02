@@ -64,12 +64,14 @@ class Collector:
         rnd, i, per = n // self._per_round, n % self._per_round, self._per_round
         return f"round {rnd + 1} of {len(self.styles)} · {i + 1} of {per}"
 
-    def add(self, strokes: Sequence[Stroke], height_px: float) -> Sample:
+    def add(self, strokes: Sequence[Stroke], height_px: float, meta: dict | None = None) -> Sample:
         target = self.target
         if target is None:
             raise RuntimeError("collection is finished")
         label, style, _ = target
         smp = sample_from_strokes(label, strokes, height_px, style=style, writer=self.writer)
+        if meta:
+            smp.meta = meta  # e.g. what the model read, as a quick check while collecting
         self.samples.append(smp)
         self._save()
         return smp

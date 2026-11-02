@@ -10,9 +10,11 @@ from test_geometry import state
 
 from ai_playground import config
 from ai_playground.gestures.engine import GestureEngine
-from ai_playground.render import effects, text
+from ai_playground.ml.charnet import Guess
+from ai_playground.render import effects, reading, text
 from ai_playground.render.background import Background
 from ai_playground.render.viewport import Viewport
+from ai_playground.scenes import writing as writing_module
 from ai_playground.scenes.base import AppContext
 from ai_playground.scenes.writing import HINTS, NO_INK, NUDGE_S, TOO_SMALL, WritingScene
 from ai_playground.sources.replay import load_clip
@@ -141,10 +143,10 @@ def test_one_held_fist_reads_the_ink(scene, cfg):
     hold(scene, [fist], cfg.writing.read_hold_s - 0.1)
     assert scene.reads == [] and 0 < scene.read_hold.progress < 1
     hold(scene, [fist], 0.15)
-    assert len(scene.reads) == 1 and scene.ink == [] and scene.fading
-    assert "read" in scene.hints.done
+    assert len(scene.reads) == 1 and scene.ink == [] and scene.result is not None
+    assert "read" in scene.hints.done and len(scene.text) == 1
     hold(scene, [fist], 1.0)  # keep holding: one read per fist
-    assert len(scene.reads) == 1 and scene.fading == []
+    assert len(scene.reads) == 1 and len(scene.text) == 1
 
 
 def test_reading_nothing_or_something_tiny_nudges(scene, cfg):
@@ -213,6 +215,7 @@ def test_idle_reset_and_c_clear_everything(scene, cfg):
     write(scene, (0.3, 0.3), (0.3, 0.7), t0=2.0, hand=2, end=False)
     scene.idle_reset()
     assert scene.ink == [] and scene.active == {} and scene.reads == []
+    assert scene.result is None and scene.text == ""
     assert scene.hints.done == set() and scene.fading
     write(scene, (0.5, 0.3), (0.5, 0.7), t0=4.0)
     scene.clear()
@@ -271,6 +274,8 @@ def replay(cfg):
             reads.append(scene.reads[-1])
         elif len(scene.reads) < n_reads:
             log["clears"] += 1
+        if scene.text:
+            log["text"] = scene.text
     return scene, reads, log
 
 
@@ -287,6 +292,7 @@ def test_fixture_reads_five_characters_erases_once_and_clears(cfg):
     finally:
         pygame.quit()
     assert [len(r) for r in reads] == [1, 1, 1, 1, 2]  # 1, 4, 7, A, E
+    assert log["text"] == "147AE"  # read by charnet_v1, end to end from hand landmarks
     assert log["erases"] == 1  # the deliberate erase, never between the E's strokes
     assert log["pen_down_in_a_fist"] == 0
     assert log["clears"] == 1 and scene.reads == [] and scene.ink == []  # no stray read
@@ -334,3 +340,87 @@ def test_collect_mode_saves_each_read_with_the_prompted_label(scene, cfg, tmp_pa
     assert c.target[0] == asked and read_samples(c.path)[1] == []
     scene.toggle_collect()
     assert scene.collector is None
+
+
+# --- W.4: reading ---------------------------------------------------------------------------------
+def read_once(scene, cfg, a=(0.5, 0.3), b=(0.5, 0.7), t0=0.0):
+    write(scene, a, b, t0=t0)
+    hold(scene, [state(cfg, 1, 0)], cfg.writing.read_hold_s + 0.05)
+    hold(scene, [], 0.05)  # open the hand: the next fist reads again
+
+
+def fake_top(*labels_p):
+    return lambda x, k=3: [Guess(lbl, p) for lbl, p in labels_p]
+
+
+def test_a_read_shows_the_top_three_and_adds_the_answer_to_the_text_line(scene, cfg):
+    read_once(scene, cfg)
+    r = scene.result
+    assert len(r.guesses) == 3 and r.guesses[0].p >= r.guesses[1].p >= r.guesses[2].p
+    assert sum(g.p for g in r.guesses) <= 1.0 + 1e-6
+    assert scene.text == r.guesses[0].label and r.image.shape == (28, 28)
+    assert r.ink and scene.ink == []  # the ink now belongs to the read: it shrinks into the grid
+
+
+def test_the_text_line_keeps_the_last_text_max_characters(scene, cfg, monkeypatch):
+    monkeypatch.setattr(scene.net, "top", fake_top(("Q", 0.9), ("O", 0.05), ("0", 0.01)))
+    scene.text = "ABCDEFGHIJK"
+    read_once(scene, cfg)
+    read_once(scene, cfg, t0=5.0)
+    assert scene.text == "ABCDEFGHIJKQQ"[-cfg.writing.text_max :]
+    assert scene.result.pair is None  # Q/O look alike, but O at 5 % is under confusable_p
+
+
+def test_look_alike_pairs():
+    pairs, p_min = "O0 I1 Z2", 0.1
+    assert reading.lookalike([Guess("0", 0.8), Guess("O", 0.15)], pairs, p_min) == ("0", "O")
+    assert reading.lookalike([Guess("I", 0.6), Guess("1", 0.3)], pairs, p_min) == ("I", "1")
+    assert reading.lookalike([Guess("0", 0.95), Guess("O", 0.04)], pairs, p_min) is None
+    assert reading.lookalike([Guess("0", 0.5), Guess("D", 0.4)], pairs, p_min) is None
+    assert reading.lookalike([Guess("0", 1.0)], pairs, p_min) is None
+
+
+def test_a_look_alike_read_shows_both(scene, cfg, monkeypatch):
+    monkeypatch.setattr(scene.net, "top", fake_top(("0", 0.8), ("O", 0.17), ("D", 0.02)))
+    read_once(scene, cfg)
+    assert scene.result.pair == ("0", "O") and scene.text == "0"  # the text takes the top guess
+
+
+def test_the_reading_draws_at_every_stage(scene, cfg, monkeypatch):
+    read_once(scene, cfg)
+    for age in (0.0, 0.2, reading.SHRINK_S + 0.1, 2.0):  # shrinking, revealing, settled
+        scene.result.t = scene._t - age
+        scene.draw(scene.surface)
+    monkeypatch.setattr(scene.net, "top", fake_top(("I", 0.6), ("1", 0.38), ("L", 0.01)))
+    read_once(scene, cfg, t0=5.0)
+    scene.result.t = scene._t - 2.0
+    scene.draw(scene.surface)
+
+
+def test_the_ink_shrinks_into_the_grid_as_the_network_frames_it():
+    grid = pygame.Rect(100, 100, 224, 224)
+    pts = np.array([[500, 200], [500, 500]], np.float32)  # a vertical line, 300 px
+    start, s0 = reading.shrink(pts, (500, 200, 500, 500), grid, 0.857, 0.0)
+    end, s1 = reading.shrink(pts, (500, 200, 500, 500), grid, 0.857, 1.0)
+    assert np.allclose(start, pts) and s0 == 1.0
+    assert np.allclose(end.mean(axis=0), grid.center, atol=0.5)
+    assert end[1, 1] - end[0, 1] == pytest.approx(224 * 0.857) and s1 < 1.0
+
+
+def test_without_the_model_a_read_shows_the_ink_only(scene, cfg):
+    scene.net = None
+    read_once(scene, cfg)
+    assert scene.result is None and scene.text == "" and scene.fading
+    assert scene.last_input.shape == (28, 28)
+    scene.draw(scene.surface)
+    assert writing_module.load_model("no/such/model.npz") is None
+
+
+def test_collect_mode_saves_what_the_model_read(scene, cfg, tmp_path, monkeypatch):
+    from ai_playground.ml.strokes import read_samples
+
+    monkeypatch.chdir(tmp_path)
+    scene.toggle_collect()
+    read_once(scene, cfg)
+    (smp,) = read_samples(scene.collector.path)[1]
+    assert smp.meta["read"] == scene.text and 0 < smp.meta["p"] <= 1
