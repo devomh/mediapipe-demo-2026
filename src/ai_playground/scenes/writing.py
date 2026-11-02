@@ -12,7 +12,10 @@ to read, two fists to start over.
 - A fist that closes while the pinch is still held ends the stroke and trims its last
   `tail_trim_s` as well: the fist label lags the curling fingers by 70-130 ms.
 - One fist held `read_hold_s` reads the ink. There is no model yet (W.3): a read stores the
-  character, fades the ink, and shows it in a small panel.
+  character, fades the ink, and shows it in a small panel with the 28x28 image the network
+  will get (W.2, ml/strokes.strokes_to_input).
+- Collect mode (T, W.2): a panel asks for a character and a writing style; each read is saved
+  with that label (scenes/collect.py). Backspace asks for the last one again.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+import numpy as np
 import pygame
 
 from ai_playground.booth import Hints
@@ -31,10 +35,12 @@ from ai_playground.ml.strokes import (
     char_size,
     cut_after,
     erase,
+    strokes_to_input,
     trim_tail,
 )
 from ai_playground.render import effects, ink
 from ai_playground.scenes.base import AppContext
+from ai_playground.scenes.collect import Collector, default_path
 from ai_playground.scenes.hand_rules import HoldTrigger, PalmArming
 from ai_playground.types import GestureEvent
 
@@ -70,6 +76,8 @@ class WritingScene:
         self.fading: list[Ink] = []
         self._fade = 0.0  # seconds into fading out `fading`
         self.reads: list[list[Stroke]] = []  # characters read since the last start over
+        self.last_input: np.ndarray | None = None  # 28x28 network input of the last read
+        self.collector: Collector | None = None
         self.hints = Hints(HINTS)
         self.effects_on = True
         self._glow = ink.InkGlow()
@@ -103,8 +111,24 @@ class WritingScene:
         self.fading = self.ink + self.fading
         self._fade = 0.0
         self.ink, self.active, self.reads = [], {}, []
+        self.last_input = None
         self._firm.clear()
         self._nudge = None
+
+    # --- collect mode -------------------------------------------------------------------
+    def toggle_collect(self) -> None:
+        assert self.ctx is not None
+        if self.collector is not None:
+            c = self.collector
+            log.info("collect mode off: %d samples in %s", len(c.samples), c.path)
+            self.collector = None
+            return
+        self.collector = Collector(default_path(), self.ctx.config.writing.writer)
+        log.info("collect mode on: saving to %s", self.collector.path)
+
+    def redo_last(self) -> None:
+        if self.collector is not None and self.collector.undo() is not None:
+            self._nudge_with("Write that one again")
 
     def idle_reset(self) -> None:
         self.clear()
@@ -253,11 +277,18 @@ class WritingScene:
             return
         self.reads.append(strokes)
         self.hints.mark("read")
+        w = self.ctx.config.writing
+        self.last_input = strokes_to_input(strokes, w.raster_width, w.ink_threshold, w.fill)
         log.info("read %d: %d strokes", len(self.reads), len(strokes))
+        saved = None
+        if self.collector is not None and not self.collector.done:
+            saved = self.collector.add(strokes, self._h())
         self.fading = self.ink + self.fading
         self._fade = 0.0
         self.ink = []
         self._nudge = None
+        if saved is not None:
+            self._nudge_with(f"Saved {saved.label}")
 
     def hint(self) -> str | None:
         if self._nudge is not None:
@@ -290,7 +321,9 @@ class WritingScene:
         for b, color in self.active.values():
             ink.draw_ink(surface, b.points, color, width, 1.0, glow)
         if self.reads:
-            ink.draw_thumbnail(surface, self.reads[-1], "You wrote")
+            ink.draw_thumbnail(surface, self.reads[-1], "You wrote", image=self.last_input)
+        if self.collector is not None:
+            ink.draw_collect_prompt(surface, self.collector.target, self.collector.progress())
         self._draw_cursors(surface)
 
     def _draw_cursors(self, surface: pygame.Surface) -> None:

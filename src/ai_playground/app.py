@@ -217,6 +217,21 @@ class App:
                 available=lambda: hasattr(self.scene, "effects_on"),
             ),
             Hotkey(
+                (pygame.K_t,),
+                "T",
+                "Collect samples (Air Writing)",
+                lambda _k: self.scene.toggle_collect(),
+                state=lambda: onoff(getattr(self.scene, "collector", None) is not None),
+                available=lambda: hasattr(self.scene, "toggle_collect"),
+            ),
+            Hotkey(
+                (pygame.K_BACKSPACE,),
+                "Bksp",
+                "Redo last sample",
+                lambda _k: self.scene.redo_last(),
+                available=lambda: getattr(self.scene, "collector", None) is not None,
+            ),
+            Hotkey(
                 (pygame.K_m,),
                 "M",
                 "Sound",

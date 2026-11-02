@@ -87,14 +87,16 @@ def draw_thumbnail(
     strokes: Sequence[Stroke],
     title: str,
     color: tuple[int, int, int] = (235, 235, 235),
+    image: np.ndarray | None = None,
 ) -> None:
-    """A small panel on the right with the last character read (W.4 replaces it with the
-    model's answer)."""
+    """A small panel on the right with the last character read and, below it, the 28x28 image
+    the network gets (W.4 replaces this with the model's answer)."""
     b = bounds(strokes)
     if b is None:
         return
     box, pad, title_h = px(150), px(12), px(26)
-    w, h = box + 2 * pad, box + 2 * pad + title_h
+    grid_h = 0 if image is None else box + title_h
+    w, h = box + 2 * pad, box + 2 * pad + title_h + grid_h
     x = surface.get_width() - w - px(16)
     y = (surface.get_height() - h) // 2
     panel = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -107,3 +109,53 @@ def draw_thumbnail(
     off = np.array([cx - scale * (x0 + x1) / 2, cy - scale * (y0 + y1) / 2], np.float32)
     for s in strokes:
         _line(surface, s.points * scale + off, color, max(1.5, px(3)))
+    if image is not None:
+        gy = y + title_h + pad + box
+        text.draw(
+            surface, "What the AI sees", (x + w // 2, gy), (90, 220, 255), 14, anchor="midtop"
+        )
+        draw_pixels(surface, image, pygame.Rect(x + pad, gy + title_h, box, box))
+
+
+def draw_pixels(surface: pygame.Surface, image: np.ndarray, rect: pygame.Rect) -> None:
+    """A small grayscale image drawn as big square pixels."""
+    g = (np.clip(image, 0.0, 1.0) * 255).astype(np.uint8)
+    rgb = np.repeat(g.T[:, :, None], 3, axis=2)
+    small = pygame.surfarray.make_surface(rgb)
+    surface.blit(pygame.transform.scale(small, rect.size), rect.topleft)
+    pygame.draw.rect(surface, (70, 75, 90), rect, 1)
+
+
+def draw_collect_prompt(
+    surface: pygame.Surface, target: tuple[str, str, str] | None, progress: str
+) -> None:
+    """Collect mode: the character to write and how, on the left."""
+    w, pad = px(190), px(14)
+    lines = ["Thank you!", "All written. Press T to stop."] if target is None else []
+    big = target[0] if target is not None else ""
+    instr = text.wrap(target[2], 15, w - 2 * pad) if target is not None else lines
+    h = pad * 3 + px(20) + (px(90) if big else 0) + px(20) * len(instr) + px(20)
+    x, y = px(16), (surface.get_height() - h) // 2
+    panel = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(panel, (0, 0, 0, 160), panel.get_rect(), 0, px(12))
+    surface.blit(panel, (x, y))
+    cy = y + pad
+    text.draw(surface, "Collect: write", (x + w // 2, cy), (255, 200, 90), 14, anchor="midtop")
+    cy += px(20)
+    if big:
+        text.draw(
+            surface,
+            big,
+            (x + w // 2, cy),
+            (255, 255, 255),
+            72,
+            mono=False,
+            bold=True,
+            anchor="midtop",
+        )
+        cy += px(90)
+    for line in instr:
+        text.draw(surface, line, (x + w // 2, cy), (225, 225, 225), 15, mono=False, anchor="midtop")
+        cy += px(20)
+    cy += pad
+    text.draw(surface, progress, (x + w // 2, cy), (150, 150, 165), 13, anchor="midtop")

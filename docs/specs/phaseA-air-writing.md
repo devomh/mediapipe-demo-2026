@@ -218,25 +218,47 @@ Some pairs are ambiguous even to people: **O/0, I/1, Z/2, S/5, B/8, G/6, D/0, Q/
 
 `ink_width`, `resample_step`, `min_char_size`, `read_hold_s`, `release_ratio`,
 `release_trim_max_s`, `tail_trim_s`, `eraser_scale`, `area_size`, `background_brightness`
-*(W.1 has these)*, then `raster_width`, `ink_threshold`, `fill`, `confusable_pairs`, `confusable_p`,
+*(W.1)*, `raster_width`, `ink_threshold`, `fill`, `writer` *(W.2)*, then `ink_threshold`, `fill`, `confusable_pairs`, `confusable_p`,
 `text_max`, `model` (path to the `.npz`). The eraser reuses `paddle_hold_s` and
 `paddle_after_pinch_s`; the clear reuses `clear_hold_s`.
 
 ## 8. Air-written data: evaluation and fine-tuning
 
-- **Collect mode:** operator key `T` in the scene. It shows a target character (cycling through
-  all 36 in random order); the writer writes it and makes a fist; the strokes are saved with the
-  label to `recordings/strokes/*.jsonl` (gitignored). **Strokes and timestamps only, never
-  images or video** (D8). The result panel still shows what the model guessed, which makes
-  collecting a quick check too.
-- **Evaluation set:** `tests/fixtures/strokes/eval_v1.jsonl.gz`, committed. Target: ≥ 10 samples
-  per class from ≥ 3 different writers (≥ 360 characters). Collect it in W.2, before the model
-  exists, so it can't be tuned to the model.
+- **Collect mode:** operator key `T` in the scene. A panel on the left shows a target character
+  and a writing style; the writer writes it and makes a fist; the strokes are saved with the
+  label to `recordings/strokes/*.jsonl` (gitignored), the whole file after every read, so
+  quitting midway keeps what was written. `Backspace` asks for the last character again (a
+  stroke went wrong, or the wrong character was written). Points are stored in window heights,
+  times from the sample's first point. **Strokes and timestamps only, never images or video**
+  (D8). The result panel shows the 28×28 image the network gets, which makes collecting a quick
+  framing check too. `scripts/air_samples.py merge` combines sessions into a set and `grid`
+  draws every sample as the network sees it.
+- **Evaluation set** *(changed in W.2: one writer)*:
+  `tests/fixtures/strokes/eval_v1.jsonl.gz`, committed. There wasn't time to find other
+  writers, so it has **3 samples per class from one writer, 108 characters**. To make one writer
+  behave more like several, each sample of a class is written in a different style, one round
+  of all 36 (shuffled) per style: **natural**; **fast and big, without lifting the fingers
+  between strokes** (visitors join strokes, as the `air_write_digits` writer did); **with the
+  other hand, or slanted**. Collect it in W.2, before the model exists, so it can't be tuned to
+  the model.
+- **What this set can and can't show.** The model gets its tolerance for different writers from
+  EMNIST (thousands of writers, plus augmentation, §5.3). What EMNIST can't show is the gap
+  between pen scans and air-writing (even width, wobble, joined strokes); that comes from the
+  medium more than the writer, and this set measures it. But 108 samples from one writer are a
+  small, narrow sample: a measured 90 % top-1 means roughly 84–96 % (95 % interval), and
+  per-class accuracy (3 samples) is only good for spotting confusions. So the evaluation script
+  reports a confidence interval with every accuracy, and the PLAN targets stay provisional.
+  **The evaluation set is never augmented:** distorted copies of the same samples are
+  correlated and would inflate the score. Augmentation is for training only (§5.3).
+- **More writers, cheaply:** in the A.8 user tests, log for every read whether it was right
+  (staff confirm with a key; strokes and labels only, D8). That gives a second, multi-writer
+  accuracy figure at no extra cost.
 - **`scripts/eval_charnet.py`:** top-1 and top-3 accuracy, per-class accuracy, and the confusion
   matrix on any stroke file.
 - **Fine-tuning** (only if the air-written accuracy misses the target): collect a separate
-  training set the same way, fine-tune in Colab at a low learning rate with EMNIST mixed in, and
-  re-export. The evaluation set is never trained on.
+  training set the same way (one writer: augment it heavily and mix in EMNIST, so the model
+  doesn't learn one person's style), fine-tune in Colab at a low learning rate, and re-export.
+  The evaluation set is never trained on.
 
 ## 9. Files
 
@@ -249,7 +271,9 @@ Some pairs are ambiguous even to people: **O/0, I/1, Z/2, S/5, B/8, G/6, D/0, Q/
 | `src/ai_playground/ml/charnet.py` | NumPy CNN inference (portable core) |
 | `assets/charnet/charnet_v1.npz`, `.json` | Weights and model card (committed) |
 | `training/charnet/` | `prepare_data.py`, `train.py`, `export.py`, `compare_framing.py`, `requirements.txt`, `README.md` (how to run it with the Colab CLI) |
-| `scripts/eval_charnet.py` | Accuracy on stroke files |
+| `scripts/eval_charnet.py` | Accuracy on stroke files, with confidence intervals |
+| `scripts/air_samples.py` | Merge collect sessions into a set; draw the framed samples as a grid |
+| `src/ai_playground/scenes/collect.py` | Collect mode: the prompt plan (36 characters × 3 styles) and saving |
 | `tests/fixtures/strokes/eval_v1.jsonl.gz`, `tests/fixtures/charnet_parity.npz`, `tests/fixtures/air_write_*.jsonl.gz` | Evaluation set, parity check, landmark clips for the interaction |
 
 **`air_write_digits` (W.1):** one right hand writes 1, 4, 7, A, E, each followed by a held fist;
@@ -265,7 +289,7 @@ the app.
 | # | Milestone | Done when |
 |---|-----------|-----------|
 | W.1 ✓ | Drawing: pinch ink, resampling, armed eraser, tail trim, read ring (no model yet), two-fist clear, idle reset. Landmark fixture `air_write_digits` | Characters look clean; no stray marks or hooks when making a fist (fixture test) |
-| W.2 | `render_strokes` + `frame_image`; collect mode; record the evaluation set (≥ 3 writers) | Evaluation set committed; our framed images look plausible next to EMNIST |
+| W.2 | `render_strokes` + `frame_image`; collect mode; record the evaluation set (one writer, 3 styles, 108 characters; §8) | Evaluation set committed; our framed images look plausible (the side-by-side with EMNIST is W.3's `compare_framing`, which needs the dataset) |
 | W.3 | Colab: data prep, framing check, augmentation, training, export; NumPy inference + parity test | NumPy matches PyTorch within 1e-4; EMNIST test and air-written accuracy reported in the model card; PLAN accuracy targets confirmed or revised |
 | W.4 | Reading UI: result, top-3 bars, "what the AI sees" grid and shrink animation, look-alike pairs, text line, hints | A new user gets a character read within 30 s |
 | W.5 | Accuracy iteration: framing, augmentation, fine-tuning if needed; accuracy floor test | PLAN §3 Air Writing exit criteria met |

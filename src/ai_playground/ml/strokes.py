@@ -4,18 +4,29 @@ A stroke is an (N, 2) float32 array of screen points plus a capture timestamp pe
 character is a list of strokes. Points are resampled to a fixed spacing, so ink density doesn't
 depend on drawing speed and the eraser can work point by point.
 
-W.2 adds `render_strokes` and `frame_image` here, shared by training and the app.
+From strokes to the network's input (spec §4), shared by training and the app so the framing
+can't drift: `render_strokes` draws the ink at 112x112, `frame_image` crops, centres, pads and
+area-averages any high-resolution ink image (ours, or an upsampled EMNIST glyph) to 28x28.
+Collected samples are stored as JSON lines (`write_samples`, `read_samples`).
 """
 
 from __future__ import annotations
 
+import gzip
+import json
 import math
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 MIN_POINTS = 3  # shorter strokes and erase fragments are dropped
+CLASSES = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # the network's 36 classes (spec §5.1)
+RENDER_SIZE = 112  # render_strokes output, 4x the network input
+INPUT_SIZE = 28
+SCHEMA = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,3 +157,181 @@ def char_size(strokes: Sequence[Stroke]) -> float:
     """The larger side of the ink's bounding box, in px (0 without ink)."""
     b = bounds(strokes)
     return 0.0 if b is None else max(b[2] - b[0], b[3] - b[1])
+
+
+# --- framing (spec §4) --------------------------------------------------------------------------
+def render_strokes(
+    strokes: Sequence[np.ndarray | Stroke], raster_width: float, size: int = RENDER_SIZE
+) -> np.ndarray:
+    """Ink in [0, 1] on a size x size float32 canvas. The character keeps its aspect ratio and is
+    centred; the line is `raster_width` x the character's larger side wide, anti-aliased over 1
+    pixel: each pixel's ink comes from its distance to the nearest segment (NumPy only).
+
+    Strokes are resampled to <= 1 px segments on the canvas, so each segment only touches a small
+    window of pixels around it; those windows are computed at once and max-ed into the image.
+    """
+    pts = [np.asarray(s.points if isinstance(s, Stroke) else s, np.float64)[:, :2] for s in strokes]
+    pts = [p for p in pts if len(p)]
+    img = np.zeros(size * size, np.float32)
+    if not pts:
+        return img.reshape(size, size)
+    allp = np.concatenate(pts)
+    lo, hi = allp.min(axis=0), allp.max(axis=0)
+    side = max(float((hi - lo).max()), 1e-6)
+    # Leave room for the line's half width (it scales with the character) plus 1 px of anti-alias.
+    scale = (size - 2.0) / (side * (1.0 + raster_width))
+    half = 0.5 * raster_width * side * scale
+    centre = (lo + hi) / 2
+    seg_a, seg_b = [], []
+    for p in pts:
+        q = _densify((p - centre) * scale + size / 2, 1.0)
+        seg_a.append(q if len(q) == 1 else q[:-1])
+        seg_b.append(q if len(q) == 1 else q[1:])
+    a, b = np.concatenate(seg_a), np.concatenate(seg_b)
+    k = int(math.ceil(2 * half + 4))  # window side: the line's width, 1 px segment, anti-alias
+    off = np.stack(np.mgrid[0:k, 0:k], axis=-1).reshape(-1, 2)[:, ::-1]  # (k*k, 2) as x, y
+    origin = np.floor((a + b) / 2).astype(np.int64) - k // 2  # (S, 2)
+    cells = origin[:, None, :] + off[None, :, :]  # (S, k*k, 2) integer pixel coordinates
+    pix = cells + 0.5
+    ab = b - a
+    denom = np.maximum((ab * ab).sum(axis=1), 1e-12)[:, None]
+    ap = pix - a[:, None, :]
+    t = np.clip((ap * ab[:, None, :]).sum(axis=2) / denom, 0.0, 1.0)
+    d = ap - t[..., None] * ab[:, None, :]
+    ink = np.clip(half + 0.5 - np.sqrt((d * d).sum(axis=2)), 0.0, 1.0).ravel()
+    x, y = cells[..., 0].ravel(), cells[..., 1].ravel()
+    inside = (x >= 0) & (x < size) & (y >= 0) & (y < size) & (ink > 0)
+    np.maximum.at(img, y[inside] * size + x[inside], ink[inside].astype(np.float32))
+    return img.reshape(size, size)
+
+
+def _densify(q: np.ndarray, step: float) -> np.ndarray:
+    """The polyline with extra points so no segment is longer than `step`."""
+    if len(q) < 2:
+        return q
+    seg = np.linalg.norm(np.diff(q, axis=0), axis=1)
+    n = np.maximum(1, np.ceil(seg / step).astype(np.int64))
+    f = np.concatenate([np.arange(m) / m for m in n])  # fractions along each segment
+    i = np.repeat(np.arange(len(seg)), n)
+    out = q[i] + f[:, None] * (q[i + 1] - q[i])
+    return np.concatenate([out, q[-1:]])
+
+
+def _area_matrix(n_in: int, n_out: int) -> np.ndarray:
+    """(n_out, n_in) weights that average input pixels over each output pixel's span."""
+    edges = np.linspace(0.0, n_in, n_out + 1)
+    lo, hi = edges[:-1, None], edges[1:, None]
+    j = np.arange(n_in)[None, :]
+    overlap = np.clip(np.minimum(hi, j + 1) - np.maximum(lo, j), 0.0, None)
+    return overlap / overlap.sum(axis=1, keepdims=True)
+
+
+def frame_image(
+    img_hi: np.ndarray, ink_threshold: float, fill: float, size: int = INPUT_SIZE
+) -> np.ndarray:
+    """Any ink image (H, W) in [0, 1] -> (size, size) float32, framed like EMNIST:
+    crop to the ink, fit into a square keeping the aspect ratio (centred on the bounding box),
+    pad so the character spans `fill` of the frame, area-average down, brightest pixel = 1."""
+    img = np.asarray(img_hi, np.float32)
+    ys, xs = np.nonzero(img > ink_threshold)
+    if len(ys) == 0:
+        return np.zeros((size, size), np.float32)
+    crop = img[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+    h, w = crop.shape
+    side = max(h, w)
+    total = max(side, int(round(side / fill)))
+    canvas = np.zeros((total, total), np.float32)
+    y0, x0 = (total - h) // 2, (total - w) // 2
+    canvas[y0 : y0 + h, x0 : x0 + w] = crop
+    a = _area_matrix(total, size)
+    out = (a @ canvas @ a.T).astype(np.float32)
+    peak = float(out.max())
+    return out / peak if peak > 0 else out
+
+
+def strokes_to_input(
+    strokes: Sequence[np.ndarray | Stroke], raster_width: float, ink_threshold: float, fill: float
+) -> np.ndarray:
+    """What the network sees: render_strokes, then frame_image."""
+    return frame_image(render_strokes(strokes, raster_width), ink_threshold, fill)
+
+
+# --- collected samples (spec §8) ----------------------------------------------------------------
+@dataclass(slots=True)
+class Sample:
+    """One written character. Points are in window heights (resolution-independent), times in
+    seconds from the sample's first point."""
+
+    label: str
+    strokes: list[np.ndarray]  # each (N, 3): x, y, t
+    style: str = ""
+    writer: str = ""
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def points(self) -> list[np.ndarray]:
+        return [s[:, :2] for s in self.strokes]
+
+
+def sample_from_strokes(
+    label: str, strokes: Sequence[Stroke], height_px: float, style: str = "", writer: str = ""
+) -> Sample:
+    t0 = min(float(s.times[0]) for s in strokes)
+    out = []
+    for s in strokes:
+        xyt = np.empty((len(s), 3), np.float64)
+        xyt[:, :2] = s.points / height_px
+        xyt[:, 2] = s.times - t0
+        out.append(xyt)
+    return Sample(label, out, style, writer)
+
+
+def write_samples(path: Path | str, samples: Iterable[Sample], header: dict | None = None) -> None:
+    """JSON lines: a header, then one sample per line. `.gz` paths are compressed."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "wt", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "header", "schema": SCHEMA, **(header or {})}) + "\n")
+        for smp in samples:
+            obj = {
+                "type": "sample",
+                "label": smp.label,
+                "style": smp.style,
+                "writer": smp.writer,
+                "strokes": [
+                    [[round(float(x), 4), round(float(y), 4), round(float(t), 3)] for x, y, t in s]
+                    for s in smp.strokes
+                ],
+            }
+            if smp.meta:
+                obj["meta"] = smp.meta
+            f.write(json.dumps(obj, separators=(",", ":")) + "\n")
+
+
+def read_samples(path: Path | str) -> tuple[dict, list[Sample]]:
+    path = Path(path)
+    opener = gzip.open if path.suffix == ".gz" else open
+    header: dict | None = None
+    samples: list[Sample] = []
+    with opener(path, "rt", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            obj = json.loads(line)
+            if obj.get("type") == "header":
+                header = obj
+            elif obj.get("type") == "sample":
+                strokes = [np.asarray(s, np.float64).reshape(-1, 3) for s in obj["strokes"]]
+                samples.append(
+                    Sample(
+                        obj["label"],
+                        strokes,
+                        obj.get("style", ""),
+                        obj.get("writer", ""),
+                        obj.get("meta", {}),
+                    )
+                )
+    if header is None:
+        raise ValueError(f"{path}: no header")
+    return header, samples
