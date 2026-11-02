@@ -4,9 +4,10 @@
 to get prospective students interested in data science and machine learning.
 
 Plan and specs: [`docs/PLAN.md`](docs/PLAN.md) · [`docs/specs/`](docs/specs/).
-**Status:** Phase 0 (foundation) is done: camera → MediaPipe → tracking → gesture events, the
-Vision scene, and record/replay. Phase A in progress: Magic Geometry (pinch to make, inflate, drop
-and throw shapes).
+**Status (2026-11-02):** Phase 0 is done. Phase A is built up to its final testing milestone:
+Magic Geometry with sound (`2`), the booth shell (idle reset, hints, hold-Esc quit), and Air
+Writing (`3`), where a CNN trained on EMNIST reads characters written in the air. Next: A.8
+(user tests, soak test, `v0.A`). See [`docs/PLAN.md`](docs/PLAN.md) §3, "Where we are".
 
 ## Setup
 

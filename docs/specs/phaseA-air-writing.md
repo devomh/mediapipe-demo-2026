@@ -333,7 +333,7 @@ the app.
 | # | Milestone | Done when |
 |---|-----------|-----------|
 | W.1 ✓ | Drawing: pinch ink, resampling, armed eraser, tail trim, read ring (no model yet), two-fist clear, idle reset. Landmark fixture `air_write_digits` | Characters look clean; no stray marks or hooks when making a fist (fixture test) |
-| W.2 | `render_strokes` + `frame_image`; collect mode; record the evaluation set (one writer, 3 styles, 108 characters; §8) | Evaluation set committed; our framed images look plausible (the side-by-side with EMNIST is W.3's `compare_framing`, which needs the dataset) |
+| W.2 ✓ | `render_strokes` + `frame_image`; collect mode; record the evaluation set (one writer, 3 styles, 108 characters; §8) | Evaluation set committed; our framed images look plausible (the side-by-side with EMNIST is W.3's `compare_framing`, which needs the dataset) |
 | W.3 ✓ | Colab: data prep, framing check, augmentation, training, export; NumPy inference + parity test | NumPy matches PyTorch within 1e-4; EMNIST test and air-written accuracy reported in the model card; PLAN accuracy targets confirmed or revised |
 | W.4 ✓ *(built; the 30 s check is part of the A.8 user tests)* | Reading UI: result, top-3 bars, "what the AI sees" grid and shrink animation, look-alike pairs, text line, hints | A new user gets a character read within 30 s |
 | W.5 | Accuracy iteration: framing, augmentation, fine-tuning if needed; accuracy floor test | PLAN §3 Air Writing exit criteria met |
