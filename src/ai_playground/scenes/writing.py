@@ -1,5 +1,5 @@
-"""Air Writing (Air Writing spec), W.1: drawing. Pinch to write, open palm to erase, one fist
-to read, two fists to start over.
+"""Air Writing (Air Writing spec): pinch to write, open palm to erase, one fist to let the
+neural network read it, two fists to start over.
 
 - Any pinching hand draws its own stroke; releasing the pinch is pen-up, not "done", so
   multi-stroke characters work.
@@ -11,9 +11,11 @@ to read, two fists to start over.
   (measured on the air_write_digits fixture).
 - A fist that closes while the pinch is still held ends the stroke and trims its last
   `tail_trim_s` as well: the fist label lags the curling fingers by 70-130 ms.
-- One fist held `read_hold_s` reads the ink. There is no model yet (W.3): a read stores the
-  character, fades the ink, and shows it in a small panel with the 28x28 image the network
-  will get (W.2, ml/strokes.strokes_to_input).
+- One fist held `read_hold_s` reads the ink (W.4): the strokes are framed into the network's
+  28x28 input (ml/strokes), CharNet reads it (ml/charnet), the ink shrinks into the 28x28 grid,
+  and the panel shows the answer, the top three with their probabilities, and "0 or O?" for
+  look-alike pairs. The answer goes on the text line at the top. Without the model file, a
+  read shows the ink and its 28x28 image only.
 - Collect mode (T, W.2): a panel asks for a character and a writing style; each read is saved
   with that label (scenes/collect.py). Backspace asks for the last one again.
 """
@@ -23,22 +25,27 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 
 import numpy as np
 import pygame
 
 from ai_playground.booth import Hints
+from ai_playground.config import REPO_ROOT
 from ai_playground.gestures.engine import HandState
+from ai_playground.ml.charnet import CharNet, Guess
 from ai_playground.ml.strokes import (
     Stroke,
     StrokeBuilder,
+    bounds,
     char_size,
     cut_after,
     erase,
     strokes_to_input,
     trim_tail,
 )
-from ai_playground.render import effects, ink
+from ai_playground.render import effects, ink, reading
 from ai_playground.scenes.base import AppContext
 from ai_playground.scenes.collect import Collector, default_path
 from ai_playground.scenes.hand_rules import HoldTrigger, PalmArming
@@ -65,6 +72,29 @@ class Ink:
     color: tuple[int, int, int]
 
 
+@dataclass(slots=True)
+class Reading:
+    """One read: what was written, what the network got, and what it answered."""
+
+    ink: list[Ink]
+    image: np.ndarray  # 28x28 network input
+    guesses: list[Guess]  # top three
+    pair: tuple[str, str] | None  # a look-alike pair to show instead of one answer
+    t: float  # scene time of the read (animations)
+
+
+@cache
+def load_model(path: str) -> CharNet | None:
+    """The network, loaded once per path. None (and a warning) if the file is missing."""
+    p = Path(path)
+    p = p if p.is_absolute() else REPO_ROOT / p
+    try:
+        return CharNet(p)
+    except (OSError, KeyError, ValueError) as e:
+        log.warning("Air Writing model not loaded (%s): reads will show the ink only", e)
+        return None
+
+
 class WritingScene:
     name = "writing"
     show_vision = False  # V still toggles it
@@ -77,6 +107,9 @@ class WritingScene:
         self._fade = 0.0  # seconds into fading out `fading`
         self.reads: list[list[Stroke]] = []  # characters read since the last start over
         self.last_input: np.ndarray | None = None  # 28x28 network input of the last read
+        self.result: Reading | None = None  # the last read, shown until the next one
+        self.text = ""  # the text line: the characters read since the last start over
+        self.net: CharNet | None = None
         self.collector: Collector | None = None
         self.hints = Hints(HINTS)
         self.effects_on = True
@@ -99,6 +132,7 @@ class WritingScene:
         self.read_hold = HoldTrigger(w.read_hold_s)
         self.clear_hold = HoldTrigger(g.clear_hold_s)
         self.effects_on = ctx.config.effects.enabled
+        self.net = load_model(w.model)
         ctx.background.empty = "gradient"
         ctx.background.mode = "dim"
         ctx.background.dim_brightness = w.background_brightness
@@ -112,6 +146,7 @@ class WritingScene:
         self._fade = 0.0
         self.ink, self.active, self.reads = [], {}, []
         self.last_input = None
+        self.result, self.text = None, ""
         self._firm.clear()
         self._nudge = None
 
@@ -277,14 +312,27 @@ class WritingScene:
             return
         self.reads.append(strokes)
         self.hints.mark("read")
-        w = self.ctx.config.writing
-        self.last_input = strokes_to_input(strokes, w.raster_width, w.ink_threshold, w.fill)
-        log.info("read %d: %d strokes", len(self.reads), len(strokes))
+        w, net = self.ctx.config.writing, self.net
+        meta: dict = {}
+        if net is not None:  # frame exactly as the network was trained
+            x = strokes_to_input(strokes, net.raster_width, net.ink_threshold, net.fill)
+            guesses = net.top(x, 3)
+            pair = reading.lookalike(guesses, w.confusable_pairs, w.confusable_p)
+            self.text = (self.text + guesses[0].label)[-max(1, w.text_max) :]
+            self.result = Reading(self.ink, x, guesses, pair, self._t)
+            meta = {"read": guesses[0].label, "p": round(guesses[0].p, 3)}
+            log.info(
+                "read %d: %s", len(self.reads), " ".join(f"{g.label} {g.p:.2f}" for g in guesses)
+            )
+        else:
+            x = strokes_to_input(strokes, w.raster_width, w.ink_threshold, w.fill)
+            self.fading = self.ink + self.fading  # no model: the ink just fades
+            self._fade = 0.0
+            log.info("read %d: %d strokes (no model)", len(self.reads), len(strokes))
+        self.last_input = x
         saved = None
         if self.collector is not None and not self.collector.done:
-            saved = self.collector.add(strokes, self._h())
-        self.fading = self.ink + self.fading
-        self._fade = 0.0
+            saved = self.collector.add(strokes, self._h(), meta)
         self.ink = []
         self._nudge = None
         if saved is not None:
@@ -320,11 +368,28 @@ class WritingScene:
             ink.draw_ink(surface, piece.stroke.points, piece.color, width, 1.0, glow)
         for b, color in self.active.values():
             ink.draw_ink(surface, b.points, color, width, 1.0, glow)
-        if self.reads:
+        if self.result is not None:
+            self._draw_reading(surface, self.result, width, glow)
+        elif self.reads:  # no model
             ink.draw_thumbnail(surface, self.reads[-1], "You wrote", image=self.last_input)
+        newest = self._t - self.result.t if self.result is not None else 1.0
+        reading.draw_text_line(surface, self.text, newest)
         if self.collector is not None:
             ink.draw_collect_prompt(surface, self.collector.target, self.collector.progress())
         self._draw_cursors(surface)
+
+    def _draw_reading(self, surface: pygame.Surface, r: Reading, width: float, glow) -> None:
+        """The panel and, while the read is young, the ink flying into the 28x28 grid."""
+        age = self._t - r.t
+        lay = reading.draw_result(surface, r.guesses, r.pair, r.image, age)
+        if age >= reading.SHRINK_S or not r.ink:
+            return
+        b = bounds([i.stroke for i in r.ink])
+        assert b is not None and self.net is not None
+        k = age / reading.SHRINK_S
+        for piece in r.ink:
+            pts, scale = reading.shrink(piece.stroke.points, b, lay.grid, self.net.fill, k)
+            ink.draw_ink(surface, pts, piece.color, max(1.0, width * scale), 1.0 - 0.5 * k, glow)
 
     def _draw_cursors(self, surface: pygame.Surface) -> None:
         assert self.ctx is not None

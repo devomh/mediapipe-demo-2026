@@ -185,6 +185,10 @@ class WritingConfig:
     ink_threshold: float
     fill: float
     writer: str
+    model: str
+    confusable_pairs: str
+    confusable_p: float
+    text_max: int
 
 
 @dataclass(frozen=True, slots=True)
