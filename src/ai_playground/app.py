@@ -12,11 +12,13 @@ from typing import Protocol
 import pygame
 
 from ai_playground.audio.sfx import Sfx
+from ai_playground.booth import HoldKey, IdleTimer
 from ai_playground.config import Config
 from ai_playground.gestures.engine import GestureEngine
 from ai_playground.pacing import FramePacer
 from ai_playground.render import text, ui
 from ai_playground.render.background import Background
+from ai_playground.render.booth import HintLine, draw_quit_hold
 from ai_playground.render.hud import Hud, Stats
 from ai_playground.render.keys import Hotkey, KeysOverlay
 from ai_playground.render.overlay import VisionOverlay
@@ -32,7 +34,7 @@ from ai_playground.types import HandFrame
 log = logging.getLogger(__name__)
 
 SCENES: dict[str, Callable[[], Scene]] = {"vision": VisionScene, "geometry": GeometryScene}
-# Operator scene keys. `1` is Vision until the Attract scene exists (A.8).
+# Operator scene keys (spec §6.0). `3` becomes Air Writing when that scene exists (W.1).
 SCENE_KEYS = {pygame.K_1: "vision", pygame.K_2: "geometry"}
 
 
@@ -82,6 +84,9 @@ class App:
         self.stats = Stats(cfg.hud.latency_window_s)
         self.hud = Hud(self.stats, cfg.hud.visible)
         self.keys_overlay = KeysOverlay(cfg.hud.keys_visible)
+        self.idle = IdleTimer(cfg.booth.idle_timeout_s)
+        self.quit_hold = HoldKey(cfg.booth.quit_hold_s)
+        self.hint_line = HintLine(cfg.booth.hints)
         self.hotkeys = self._hotkeys()
         self.clock = pygame.time.Clock()  # error screen only
         self.pacer = FramePacer(cfg.display.target_fps)
@@ -235,7 +240,12 @@ class App:
                 lambda _k: self.toggle_fullscreen(),
                 state=lambda: onoff(self.fullscreen),
             ),
-            Hotkey((pygame.K_ESCAPE,), "Esc", "Quit", lambda _k: setattr(self, "running", False)),
+            Hotkey(
+                (pygame.K_ESCAPE,),
+                "Esc",
+                f"Quit (hold {self.cfg.booth.quit_hold_s:g} s)",
+                lambda _k: self.quit_hold.press(),
+            ),
         ]
 
     def _on_key(self, key: int) -> None:
@@ -258,6 +268,10 @@ class App:
                         self.running = False
                     elif ev.type == pygame.KEYDOWN:
                         self._on_key(ev.key)
+                    elif ev.type == pygame.KEYUP and ev.key == pygame.K_ESCAPE:
+                        self.quit_hold.release()
+                    elif ev.type == pygame.WINDOWFOCUSLOST:
+                        self.quit_hold.release()  # the key-up would go to another window
                     elif ev.type in (pygame.VIDEORESIZE, pygame.WINDOWSIZECHANGED):
                         self._on_resize(pygame.display.get_surface())
 
@@ -279,10 +293,12 @@ class App:
 
                 dt = self.pacer.tick()
                 assert self.scene is not None
+                self._booth_update(dt)
                 self.scene.update(dt)
                 self.overlay.update(dt)
                 self.scene.draw(self.surface)
                 self.overlay.draw(self.surface, self.viewport)
+                self.hint_line.draw(self.surface)
                 status = "replay finished" if self.source.finished else ""
                 if getattr(self.source, "restarts", 0):
                     status = f"recognizer restarts {self.source.restarts}"
@@ -291,6 +307,7 @@ class App:
                     self.surface, self.opts.source_label, self.hands_tracked, rec_s, status
                 )
                 self.keys_overlay.draw(self.surface, self.hotkeys)
+                draw_quit_hold(self.surface, self.quit_hold)
                 pygame.display.flip()
 
                 self.stats.render_fps = self.pacer.fps
@@ -308,6 +325,16 @@ class App:
             self.stop_recording()
             self.sfx.close()
         return 0
+
+    def _booth_update(self, dt: float) -> None:
+        """Booth shell, once per frame: hold-Esc quit, idle reset, hint line (spec §6.0)."""
+        assert self.scene is not None
+        if self.quit_hold.update(dt):
+            self.running = False
+        if self.idle.update(dt, self.hands_tracked > 0):
+            log.info("no hands for %.0f s: resetting %s", self.idle.timeout_s, self.scene.name)
+            self.scene.idle_reset()
+        self.hint_line.update(dt, self.scene.hint())
 
     def _process(self, frame: HandFrame) -> None:
         self.ctx.frame = frame

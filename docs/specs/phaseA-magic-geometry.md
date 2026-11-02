@@ -213,7 +213,7 @@ for later classroom use. It is off by default.
 
 ## 6. Exhibit shell
 
-### 6.0 Booth-minimum shell — *the part built now (PLAN D14)*
+### 6.0 Booth-minimum shell — *built in A.6 (PLAN D14)*
 
 | Piece | Behavior |
 |-------|----------|
@@ -222,6 +222,19 @@ for later classroom use. It is off by default.
 | **Operator keys** | `1` Vision · `2` Geometry · `3` Air Writing · `M` mute · `V` vision overlay · `H` HUD · `B` background · `C` clear · `F` fullscreen · `K` keys list |
 | **Quit** | **Hold `Esc` 2 s** (today `Esc` quits at once), so a curious visitor can't close the app |
 | **Fullscreen** | `--fullscreen` and `F` already exist; check both machines at the event resolution |
+
+*As built (A.6):* settings live in `[booth]` (`idle_timeout_s`, `hints`, `quit_hold_s`). The
+state machines are in `booth.py` (`IdleTimer`, `HoldKey`, `Hints`) and the drawing in
+`render/booth.py`. Every scene provides `hint()` and `idle_reset()`.
+- **Idle:** "no hands" means no hand tracked in the newest frame. The reset fires once per idle
+  spell. Geometry fades its shapes out, drops any shape being made, restarts the shape cycle,
+  and brings the hints back. Vision only brings its hints back.
+- **Hint line:** a new hint waits until it has been wanted for 0.3 s, so a quick pinch doesn't
+  flash "let go to throw". Hints cross-fade in 0.25 s. They sit bottom centre on a dark pill.
+- **Quit:** while Esc is held, a bar at the top fills over `quit_hold_s`. A shorter tap shows
+  "Hold Esc for 2 s to quit" for 1.5 s. Losing window focus cancels the hold. The window's
+  close button and the error screen still quit at once.
+- **`3`:** wired when the Air Writing scene exists (W.1).
 
 Below, the **attract scene and dwell buttons are parked**. The onboarding hints are used by the
 hint line.
@@ -234,12 +247,21 @@ hint line.
 - No hands for `idle_timeout` (20 s) in any scene → fade back to Attract and reset state
   (shapes, trained model).
 
-**Onboarding hints** are contextual. Each disappears once performed and is skipped if already done:
-1. "Pinch your thumb and index finger to create a shape."
-2. "Let go to drop it — move while letting go to throw!"
-3. "Hold up fingers with your other hand to choose a shape: 1 ● 3 ▲ 4 ■ 5 ⬟"
-4. "Make a fist on a shape to grab it."
-5. "Push shapes with your open hand."
+**Onboarding hints** are contextual. Each disappears once performed and is skipped if already done.
+The first one, in order, that applies right now is shown:
+1. "Pinch your thumb and index finger to make a shape" (done: a shape is started).
+2. "Let go to drop it, or move as you let go to throw it!" (only while holding a new shape;
+   done: a release fast enough to whoosh).
+3. "Hold up 1 to 5 fingers with your other hand to choose the shape" (done: a shape chosen
+   with fingers). The palette on the right shows which count is which shape; symbols in the
+   hint itself are missing from the system fonts.
+4. "Make a fist on a shape to grab it" (once there are shapes; done: any grab).
+5. "Hold your hand open to push shapes around" (once there are shapes; done: a paddle arms).
+6. *Added in A.6:* "Make two fists and hold them to clear the screen" (once there are 10
+   shapes; done: a two-fist clear), so visitors tidy up after themselves.
+
+Vision has two: "Raise your hand: the computer finds 21 points on it", then "Make a fist,
+open your hand, or pinch, and watch the table".
 
 **Touchless navigation: dwell buttons** *(parked)*. A small strip of buttons along the **top edge**, which a
 hand rarely reaches by accident. Hover the palm cursor for 1.2 s; a fill ring shows progress.
@@ -262,7 +284,7 @@ Buttons:
 | A.3 ✓ | Hand paddle, fist grab, two-fist clear | Each action works for 2 new users without explanation |
 | A.4 ✓ | Visual polish: palette, glow, particles, preview, cursors | 60 FPS with 40 bodies and 1,500 particles on both machines |
 | A.5 ✓ | Sound effects (§4.1) | Every event in §4.1 sounds; a 40-shape pile stays quiet; 60 FPS kept; silent run without an audio device |
-| A.6 | Booth-minimum shell (§6.0) | Idle reset, hint line, hold-Esc quit, and `1`/`2`/`3`/`M` work in both scenes |
+| A.6 ✓ | Booth-minimum shell (§6.0) | Idle reset, hint line, hold-Esc quit, and `1`/`2`/`3`/`M` work in both scenes |
 | A.7 | Air Writing, milestones W.1–W.5 ([spec](phaseA-air-writing.md#10-milestones)) | Air Writing exit criteria in PLAN §3 met |
 | A.8 | Test with ≥ 5 new users, 30-min soak test, Ubuntu laptop check, tag `v0.A` | PLAN §3 Phase A exit criteria met |
 

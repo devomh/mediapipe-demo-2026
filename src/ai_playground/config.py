@@ -170,6 +170,13 @@ class SoundConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class BoothConfig:
+    idle_timeout_s: float
+    hints: bool
+    quit_hold_s: float
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     camera: CameraConfig
     recognizer: RecognizerConfig
@@ -181,6 +188,7 @@ class Config:
     geometry: GeometryConfig
     effects: EffectsConfig
     sound: SoundConfig
+    booth: BoothConfig
 
     def model_path(self) -> Path:
         p = Path(self.recognizer.model_path)

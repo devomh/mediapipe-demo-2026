@@ -126,3 +126,8 @@ impact_full_dv = 2.0      # a hit this hard plays at full volume
 max_impacts_per_frame = 3 # loudest first
 piece_cooldown_s = 0.08   # a shape that just sounded stays quiet this long (no buzzing stacks)
 throw_min_speed = 0.8     # releases faster than this (window heights/s) whoosh; slower ones drop
+
+[booth]
+idle_timeout_s = 20.0     # no hands for this long -> the current scene resets (0 = never)
+hints = true              # one onboarding line at the bottom; each hint goes once it's been done
+quit_hold_s = 2.0         # hold Esc this long to quit, so a visitor tapping it can't close the app
