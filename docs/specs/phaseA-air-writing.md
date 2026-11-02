@@ -48,12 +48,23 @@ Any pinching hand draws, so two hands may write at once. Each has its own active
 - **Pinch is already blocked during a fist** (`block_on_fist`, `min_index_extension` in
   `[gestures.pinch]`), so making a fist doesn't start a new stroke.
 
-**New rule: trim the tail of a stroke before a fist.** Curling the hand into a fist drags the
-pinch point a little before the pinch ends or the fist is recognized, which leaves a hook at the
-end of the last stroke. When `fist_start` arrives within `tail_window_s` (0.4 s) of that hand's
-last pinch end, or while it is still pinching, drop the last `tail_trim_s` (0.15 s, tune on the
-fixture) of that stroke. Fist labels lag the real fist by 70–130 ms (Geometry §3), so trimming by
-time, not by distance, is the robust choice.
+**New rule: drop the release drag at every pen-up** *(revised in W.1, measured on
+`air_write_digits`)*. Letting go of a pinch drags the pinch point: as thumb and index open, the
+pinch ratio climbs from ~0.2 past 0.5 over 2–4 frames (60–130 ms) before `pinch_end` fires, and
+the ink point slides 0.03–0.08 window heights. That leaves a hook at the end of **every** stroke,
+not only before a fist (the first spec's assumption): the "1" in the fixture had one with the fist
+0.67 s later. So a pen-up drops the ink drawn after the pinch ratio last rose above
+`release_ratio` (0.35, the pinch's own enter threshold), at most `release_trim_max_s` (0.25 s) so
+a loosely held pinch keeps its ink. Curling into a fist opens the pinch too, so this also removes
+the hook of a fist made right after writing (the 7 and the A in the fixture). Thresholds of 0.27
+and 0.30 made no visible difference; the remaining 1–3 % ticks are real hand movement while the
+pinch is still firmly closed.
+
+A fist that closes **while the pinch is still held** ends the stroke and also trims its last
+`tail_trim_s` (0.15 s), since the fist label lags the curling fingers by 70–130 ms (Geometry §3).
+The fixture has no such case (its writer always let go first), so 0.15 s is untested on real
+hands. The first spec's `tail_window_s` (trim after a fist within 0.4 s of a pinch end) is gone:
+on the fixture it only removed good ink once the release drag was handled.
 
 **Fist with no ink:** no read; the hint line says *"Pinch to write first."*
 
@@ -205,8 +216,9 @@ Some pairs are ambiguous even to people: **O/0, I/1, Z/2, S/5, B/8, G/6, D/0, Q/
 
 ## 7. Configuration `[writing]`
 
-`ink_width`, `resample_step`, `min_char_size`, `read_hold_s`, `tail_window_s`, `tail_trim_s`,
-`eraser_scale`, `raster_width`, `ink_threshold`, `fill`, `confusable_pairs`, `confusable_p`,
+`ink_width`, `resample_step`, `min_char_size`, `read_hold_s`, `release_ratio`,
+`release_trim_max_s`, `tail_trim_s`, `eraser_scale`, `area_size`, `background_brightness`
+*(W.1 has these)*, then `raster_width`, `ink_threshold`, `fill`, `confusable_pairs`, `confusable_p`,
 `text_max`, `model` (path to the `.npz`). The eraser reuses `paddle_hold_s` and
 `paddle_after_pinch_s`; the clear reuses `clear_hold_s`.
 
@@ -231,12 +243,19 @@ Some pairs are ambiguous even to people: **O/0, I/1, Z/2, S/5, B/8, G/6, D/0, Q/
 | Path | What |
 |------|------|
 | `src/ai_playground/scenes/writing.py` | Scene: gestures → ink, read, UI |
+| `src/ai_playground/scenes/hand_rules.py` | `PalmArming` and `HoldTrigger`, shared with Geometry's paddle and clear |
+| `src/ai_playground/render/ink.py` | Ink with glow, the writing area, the "You wrote" thumbnail (W.1 stand-in for the result panel) |
 | `src/ai_playground/ml/strokes.py` | Resample, erase, `render_strokes`, `frame_image` (portable core) |
 | `src/ai_playground/ml/charnet.py` | NumPy CNN inference (portable core) |
 | `assets/charnet/charnet_v1.npz`, `.json` | Weights and model card (committed) |
 | `training/charnet/` | `prepare_data.py`, `train.py`, `export.py`, `compare_framing.py`, `requirements.txt`, `README.md` (how to run it with the Colab CLI) |
 | `scripts/eval_charnet.py` | Accuracy on stroke files |
 | `tests/fixtures/strokes/eval_v1.jsonl.gz`, `tests/fixtures/charnet_parity.npz`, `tests/fixtures/air_write_*.jsonl.gz` | Evaluation set, parity check, landmark clips for the interaction |
+
+**`air_write_digits` (W.1):** one right hand writes 1, 4, 7, A, E, each followed by a held fist;
+one stroke is erased with an open palm before the E; two fists clear at the end. 54 s; a 15.8 s
+held fist was cut out. Note that the writer drew the 4 and the A without lifting the pen; visitors
+will too, so W.2's evaluation set should include such connected characters.
 
 `training/` imports `ml/strokes.py` from the repo, so framing can't drift between training and
 the app.
@@ -245,7 +264,7 @@ the app.
 
 | # | Milestone | Done when |
 |---|-----------|-----------|
-| W.1 | Drawing: pinch ink, resampling, armed eraser, tail trim, read ring (no model yet), two-fist clear, idle reset. Landmark fixture `air_write_digits` | Characters look clean; no stray marks or hooks when making a fist (fixture test) |
+| W.1 ✓ | Drawing: pinch ink, resampling, armed eraser, tail trim, read ring (no model yet), two-fist clear, idle reset. Landmark fixture `air_write_digits` | Characters look clean; no stray marks or hooks when making a fist (fixture test) |
 | W.2 | `render_strokes` + `frame_image`; collect mode; record the evaluation set (≥ 3 writers) | Evaluation set committed; our framed images look plausible next to EMNIST |
 | W.3 | Colab: data prep, framing check, augmentation, training, export; NumPy inference + parity test | NumPy matches PyTorch within 1e-4; EMNIST test and air-written accuracy reported in the model card; PLAN accuracy targets confirmed or revised |
 | W.4 | Reading UI: result, top-3 bars, "what the AI sees" grid and shrink animation, look-alike pairs, text line, hints | A new user gets a character read within 30 s |

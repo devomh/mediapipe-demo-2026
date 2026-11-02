@@ -118,10 +118,10 @@ ai-playground/                      (repo root)
 │   ├── gestures/       features.py  detectors.py  engine.py            ◄ portable core
 │   ├── ml/             strokes.py  charnet.py                           ◄ portable (Air Writing)
 │   │                   features.py  dataset.py  classifier.py  pca.py   (Train-a-Gesture, parked)
-│   ├── render/         viewport.py  ui.py  overlay.py  hud.py  keys.py  booth.py  background.py  effects.py  text.py
+│   ├── render/         viewport.py  ui.py  overlay.py  hud.py  keys.py  booth.py  ink.py  background.py  effects.py  text.py
 │   ├── physics/        world.py                                        (Phase A)
 │   ├── audio/          sfx.py (Phase A)  engine.py  voices.py  dsp.py  scales.py  (Phase B; scales.py portable)
-│   └── scenes/         base.py  vision.py  geometry.py  writing.py  ·  later: attract.py  train.py  synth.py  orchestra.py
+│   └── scenes/         base.py  hand_rules.py  vision.py  geometry.py  writing.py  ·  later: attract.py  train.py  synth.py  orchestra.py
 ├── tests/
 │   ├── fixtures/                   *.jsonl landmark recordings (small, committed)
 │   ├── synthetic.py                build hands programmatically (pinch of distance d, fist, open palm…)
