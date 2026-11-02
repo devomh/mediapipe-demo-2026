@@ -110,6 +110,7 @@ ai-playground/                      (repo root)
 ├── src/ai_playground/
 │   ├── __main__.py                 CLI entry: `uv run ai-playground [--replay f] [--record f] [--scene s] ...`
 │   ├── app.py                      main loop, scene manager, hotkeys
+│   ├── booth.py                    booth shell state: idle timer, hold-to-quit, onboarding hints
 │   ├── config.py                   TOML → frozen dataclasses
 │   ├── types.py
 │   ├── sources/        camera.py  live.py (camera + recognizer worker)  replay.py  recorder.py  slot.py
@@ -117,7 +118,7 @@ ai-playground/                      (repo root)
 │   ├── gestures/       features.py  detectors.py  engine.py            ◄ portable core
 │   ├── ml/             strokes.py  charnet.py                           ◄ portable (Air Writing)
 │   │                   features.py  dataset.py  classifier.py  pca.py   (Train-a-Gesture, parked)
-│   ├── render/         viewport.py  ui.py  overlay.py  hud.py  keys.py  background.py  effects.py  text.py
+│   ├── render/         viewport.py  ui.py  overlay.py  hud.py  keys.py  booth.py  background.py  effects.py  text.py
 │   ├── physics/        world.py                                        (Phase A)
 │   ├── audio/          sfx.py (Phase A)  engine.py  voices.py  dsp.py  scales.py  (Phase B; scales.py portable)
 │   └── scenes/         base.py  vision.py  geometry.py  writing.py  ·  later: attract.py  train.py  synth.py  orchestra.py

@@ -793,3 +793,61 @@ def test_a_collapsing_pile_is_capped_and_then_falls_silent(scene, cfg, sounds):
     assert max(per_frame) <= cfg.sound.max_impacts_per_frame
     assert sum(per_frame[:120]) > 0  # the pile landing is heard...
     assert sum(per_frame[-60:]) == 0  # ...and once it settles, it is quiet
+
+
+# --- A.6: hints and idle reset --------------------------------------------------------------
+from ai_playground.scenes.geometry import CLEAR_HINT_AT, HINTS  # noqa: E402
+
+
+def test_hints_follow_what_the_visitor_has_done(scene, cfg):
+    assert scene.hint() == HINTS["create"]
+    scene.handle([ev("pinch_start", 0.0)], [])
+    assert scene.hint() == HINTS["throw"]  # a shape in hand
+    scene.handle([ev("pinch_end", 0.5, vel=(0.01, 0.0), reason="released")], [])
+    assert scene.hint() == HINTS["choose"]  # a slow drop doesn't count as a throw
+    far = (0.15, 0.2)  # away from the dropped shape, or the pinch would grab it
+    scene.handle(
+        [ev("pinch_start", 1.0, pos=far), ev("pinch_end", 1.3, pos=far, vel=(1.0, -0.5))], []
+    )
+    assert "throw" in scene.hints.done
+    maker = state(cfg, 1, 0, handedness="Right", center=(0.7, 0.5))
+    other = state(cfg, 2, 3)
+    hold(scene, cfg, [maker, other])
+    scene.handle([ev("pinch_start", 2.0, hand=1, pos=(0.8, 0.2))], [maker, other])
+    scene.handle([ev("pinch_end", 2.3, hand=1, pos=(0.8, 0.2), reason="released")], [])
+    assert scene.hint() == HINTS["grab"]
+    scene.hints.mark("grab")
+    assert scene.hint() == HINTS["push"]
+    arm(scene, cfg, [state(cfg, 3, 5, center=(0.5, 0.9))])
+    assert scene.hint() is None  # under CLEAR_HINT_AT shapes: nothing left to teach
+
+
+def test_clear_hint_needs_a_full_screen(scene):
+    scene.hints.done |= {"create", "throw", "choose", "grab", "push"}
+    for i in range(CLEAR_HINT_AT):
+        scene.world.spawn("circle", (100 + 100 * i, 300), 30)
+    assert scene.hint() == HINTS["clear"]
+    scene._burst()
+    assert scene.hint() is None
+
+
+def test_grab_marks_its_hint(scene, cfg):
+    fist = state(cfg, 1, 0, center=(0.4, 0.5))
+    scene.world.spawn("square", palm_px(scene, fist), 40)
+    scene.handle([fist_event("fist_start", fist, 0.0)], [fist])
+    assert "grab" in scene.hints.done
+
+
+def test_idle_reset_fades_shapes_and_brings_hints_back(scene, cfg, sounds):
+    scene.handle([ev("pinch_start", 0.0), ev("pinch_end", 0.3, vel=(1.0, -0.5))], [])
+    scene.handle([ev("pinch_start", 1.0, hand=2, pos=(0.15, 0.2))], [])  # one being made
+    scene.update(1 / 60)
+    assert scene.hints.done and scene.pending and sounds.inflating
+    scene.idle_reset()
+    assert scene.pending == {} and not sounds.inflating
+    assert scene.hints.done == set() and scene.hint() == HINTS["create"]
+    assert scene.world.pieces and all(p.fade is not None for p in scene.world.pieces)
+    for _ in range(round(cfg.physics.fade_s * 60) + 5):
+        scene.update(1 / 60)
+    assert scene.world.pieces == []
+    scene.draw(scene.surface)

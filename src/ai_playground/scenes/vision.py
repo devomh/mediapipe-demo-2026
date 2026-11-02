@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 import pygame
 
+from ai_playground.booth import Hints
 from ai_playground.gestures.engine import HandState
 from ai_playground.scenes.base import AppContext
 from ai_playground.types import GestureEvent
@@ -21,6 +22,12 @@ class VisionScene:
 
     def __init__(self) -> None:
         self.ctx: AppContext | None = None
+        self.hints = Hints(
+            {
+                "raise": "Raise your hand: the computer finds 21 points on it",
+                "gesture": "Make a fist, open your hand, or pinch, and watch the table",
+            }
+        )
 
     def enter(self, ctx: AppContext) -> None:
         self.ctx = ctx
@@ -31,7 +38,16 @@ class VisionScene:
         self.ctx = None
 
     def handle(self, events: Sequence[GestureEvent], hands: Sequence[HandState]) -> None:
-        pass
+        if any(h.visible for h in hands):
+            self.hints.mark("raise")
+        if any(e.type in ("fist_start", "palm_start", "pinch_start") for e in events):
+            self.hints.mark("gesture")
+
+    def hint(self) -> str | None:
+        return self.hints.first(self.hints.texts)
+
+    def idle_reset(self) -> None:
+        self.hints.reset()
 
     def update(self, dt: float) -> None:
         pass

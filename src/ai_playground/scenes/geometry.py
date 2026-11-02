@@ -12,6 +12,9 @@
 - A.5: sound effects: pop on spawn, a rising tone while inflating, whoosh on throws, click on
   grabs, struck tones on impacts (timbre from the kind, pitch from the size, volume from the
   hit), and a sweep on clear (audio/sfx.py).
+
+- A.6: onboarding hints for the booth hint line; an idle reset fades the shapes out and brings
+  the hints back.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from dataclasses import dataclass
 import pygame
 
 from ai_playground.audio.sfx import Hit, ImpactLimiter, impact_name, size_bucket
+from ai_playground.booth import Hints
 from ai_playground.gestures.engine import HandState
 from ai_playground.physics.world import KINDS, Piece, World
 from ai_playground.render import effects
@@ -31,6 +35,16 @@ from ai_playground.render.particles import GlowCache, Particles
 from ai_playground.scenes.base import AppContext
 from ai_playground.scenes.geometry_hands import HandPlay
 from ai_playground.types import GestureEvent
+
+HINTS = {
+    "create": "Pinch your thumb and index finger to make a shape",
+    "throw": "Let go to drop it, or move as you let go to throw it!",
+    "choose": "Hold up 1 to 5 fingers with your other hand to choose the shape",
+    "grab": "Make a fist on a shape to grab it",
+    "push": "Hold your hand open to push shapes around",
+    "clear": "Make two fists and hold them to clear the screen",
+}
+CLEAR_HINT_AT = 10  # live shapes before the two-fist clear is suggested
 
 
 @dataclass(slots=True)
@@ -102,6 +116,7 @@ class GeometryScene:
         self.play: HandPlay | None = None
         self.limiter = ImpactLimiter(3, 0.08)
         self._inflating: set[int] = set()  # hands whose shape is inflating (tone playing)
+        self.hints = Hints(HINTS)
 
     # --- lifecycle ----------------------------------------------------------------------
     def enter(self, ctx: AppContext) -> None:
@@ -147,6 +162,34 @@ class GeometryScene:
         if self.world is not None:
             self.world.clear()
 
+    def idle_reset(self) -> None:
+        """Nobody here: shapes fade out, the shape cycle and the hints start over."""
+        self.pending.clear()
+        self._owner.clear()
+        self._pinch.clear()
+        if self.ctx is not None:
+            self.ctx.sfx.stop_inflate()
+        self._inflating = set()
+        if self.play is not None:
+            self.play.reset()
+        if self.world is not None:
+            for piece in self.world.pieces:
+                if piece.fade is None:
+                    piece.fade = 0.0
+        self._next_kind = 0
+        self.hints.reset()
+
+    def hint(self) -> str | None:
+        if any(p.partner is None for p in self.pending.values()):
+            return self.hints.first(("throw", "choose"))  # a shape in hand
+        applicable = ["create", "choose"]
+        live = sum(p.fade is None for p in self.world.pieces) if self.world is not None else 0
+        if live:
+            applicable += ["grab", "push"]
+        if live >= CLEAR_HINT_AT:
+            applicable.append("clear")
+        return self.hints.first(applicable)
+
     @property
     def effects_on(self) -> bool:
         """Glow and particles (decoration). Cursors, previews, and the palette always show."""
@@ -171,6 +214,7 @@ class GeometryScene:
             pos = piece.body.position
             self._emit(n, (pos.x, pos.y), piece.hue, speed=(0.2 * h, 0.9 * h), life=(0.6, 1.3))
         self.ctx.sfx.play("clear")
+        self.hints.mark("clear")
         self.clear()
 
     def _sparks(self) -> None:
@@ -221,6 +265,7 @@ class GeometryScene:
 
     def _on_grab(self, piece: Piece) -> None:
         assert self.ctx is not None
+        self.hints.mark("grab")
         self.ctx.sfx.play("grab", 1.0, self._x(piece.body.position.x))
 
     def _on_throw(self, piece: Piece) -> None:
@@ -228,6 +273,7 @@ class GeometryScene:
         assert self.ctx is not None
         speed = math.hypot(*piece.body.velocity) / self.ctx.viewport.window_size[1]
         if speed >= self.ctx.config.sound.throw_min_speed:
+            self.hints.mark("throw")
             volume = 0.4 + 0.6 * min(1.0, speed / self.ctx.config.physics.max_speed)
             self.ctx.sfx.play("throw", volume, self._x(piece.body.position.x))
 
@@ -346,6 +392,9 @@ class GeometryScene:
                 self.pending[hid] = Pending(
                     kind, hue, e.t, self._px(e.pos), self._radius(0.0), chosen=chosen
                 )
+                self.hints.mark("create")
+                if chosen:
+                    self.hints.mark("choose")
                 self.ctx.sfx.play("spawn", 1.0, self._x(self._pinch[hid][0][0]))
             elif e.type == "pinch_move":
                 self._pinch[hid] = (self._px(e.pos), e.vel)
@@ -369,6 +418,7 @@ class GeometryScene:
                 kind = self.chosen_kind(maker=owner)
                 if kind is not None and kind != p.kind:
                     p.kind, p.chosen = kind, True
+                    self.hints.mark("choose")
 
         assert self.play is not None
         self.play.handle(events, hands)
@@ -381,6 +431,8 @@ class GeometryScene:
             self.world.resize(self.ctx.viewport.window_size)
         assert self.play is not None
         self.play.update(dt)
+        if any(hb.shape is not None for hb in self.world.hands.values()):
+            self.hints.mark("push")  # an armed paddle
         self.world.step(dt)
         self._sparks()
         self._impact_sounds()
