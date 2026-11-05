@@ -126,9 +126,10 @@ to play). Waveform/spectrum view as the "discover" layer.
 
 - Informal tests of Geometry and Air Writing are satisfactory; A.8 (staff key, soak test, Ubuntu
   laptop, `v0.A`) is still open.
-- Spec refined for the Theremin: spike first (B.0), one voice before the Piano's voice pool, three
-  v1 controls, slow-snap pitch mapping, `scipy` for the filter
-  ([Phase B §8](specs/phaseB-airsynth.md#8-milestones)).
+- Spec refined for the Theremin: spike first (B.0), one voice before the Piano's voice pool, a
+  dedicated Theremin scene with pitch and volume zones, three v1 controls, evenly spaced note
+  marks with the pitch continuous between them (a "magnet" pulls it towards the notes), a volume
+  bar, `scipy` for the filter ([Phase B §4, §8](specs/phaseB-airsynth.md#8-milestones)).
 - **Next:** B.0 measurements on the MacBook and the Ubuntu laptop (`--audio-spike`).
 
 **Exit criteria**

@@ -1,6 +1,6 @@
 # Phase B — AirSynth
 
-**Outcome:** hands become a musical instrument, in two modes: **Theremin** (continuous) and
+**Outcome:** hands become a musical instrument, in two scenes: **Theremin** (continuous) and
 **Invisible Piano** (discrete notes). A real-time audio engine gets built here and is reused by
 Phase C.
 
@@ -17,8 +17,8 @@ pool and envelopes come with the Piano.
 
 ## 1. Principles
 
-- **Always sounds good:** default to pentatonic scales and snap pitch to the scale, so random
-  movement still sounds musical.
+- **Always sounds good:** default to pentatonic scales and pull pitch towards the scale's notes,
+  so random movement still sounds musical.
 - **Audio never waits on vision:** synthesis runs in the audio callback. The main thread only
   sets targets and queues note events.
 - **Latency is a feature:** measure it, show it in the HUD, and choose interactions that tolerate it.
@@ -93,25 +93,41 @@ tests and to write WAV files for listening checks.
 
 - MIDI ↔ Hz, note names.
 - Scale tables: major and minor pentatonic, blues, major, Dorian, Hirajoshi.
-- `quantize(u ∈ [0,1], scale, root, octaves) -> midi`.
-- `snap(continuous_midi, scale, strength)` for partial snapping.
+- `scale_notes(scale, root, octaves) -> tuple[int, ...]`: the marks, root to root.
+- `note_position(u ∈ [0,1], n) -> p` (band height → continuous note position, §4.2).
+- `magnet(p, m) -> p'` and `position_to_midi(p, notes) -> midi` (interpolation in semitones).
+- `nearest(midi, notes) -> (note, cents)` for the mark highlight and the Discover panel.
 - Fully unit-tested.
 
-## 4. Mode 1 — Theremin
+## 4. Theremin scene (`scenes/theremin.py`)
 
-**Hand roles go by screen side, not by MediaPipe handedness.** The hand on the right half of the
-screen is the **pitch hand**; the one on the left is the **expression hand**. This works the same
-for left-handed visitors and is immune to handedness label errors. With one hand in view, it is
-the pitch hand wherever it is.
+A dedicated scene (operator key `4`), with nothing else on screen to compete with the instrument.
+The Piano gets its own scene later (§5).
+
+### 4.1 Zones and hand roles
+
+**Hand roles go by screen side, not by MediaPipe handedness.** The screen is split into two
+zones by a faint vertical divider:
+
+- **Right half: the pitch zone.** The hand here is the **pitch hand**.
+- **Left half: the volume zone.** The hand here is the **volume hand**.
+
+This works the same for left-handed visitors and is immune to handedness label errors. With one
+hand in view, it is the pitch hand wherever it is, so a visitor who tries one hand first hears
+sound at once.
+
+The **active band** is the middle 15–85 % of the screen height in both zones. Tracking is worse
+near the edges, and arms get tired at the top. It is drawn with a clear border; the areas above
+and below it are dimmed. Outside the band, the value clamps to the nearest edge.
 
 **v1 controls (B.3): three, all discoverable without instructions.** A visitor has about 30
 seconds and no manual; six mappings across two hands is too many to find.
 
 | Input | Parameter |
 |-------|-----------|
-| Pitch hand: index-tip height | Pitch over 2 octaves, **snapped to scale** (below), glide 60 ms |
-| Expression hand: palm height | Volume, the way a real theremin works (higher = louder). No expression hand → fixed 0.7 |
-| Pitch hand: horizontal position | Timbre blend, sine → saw. Harmless if nobody notices it |
+| Pitch hand: index-tip height | Pitch over 2 octaves (§4.2), glide 60 ms |
+| Volume hand: palm height | Volume, the way a real theremin works (higher = louder). No volume hand → fixed 0.7 |
+| Pitch hand: horizontal position within the pitch zone | Timbre blend: sine at the divider → saw at the outer edge. Never changes the pitch. Shown by the orb's look (§4.3); dropped to a B.5 candidate if the B.3 tests show it confuses visitors |
 | No pitch hand | Release (fade out over 300 ms) |
 
 **Candidates after the B.3 user tests (B.5),** added only if visitors have mastered the three
@@ -119,31 +135,74 @@ above. The features already exist in `gestures/features.py` (`pinch_ratio`, `pal
 
 | Input | Parameter |
 |-------|-----------|
-| Expression hand: palm roll | Filter cutoff (needs the SciPy filter) |
+| Volume hand: palm roll | Filter cutoff (needs the SciPy filter) |
 | Both hands moving apart (distance) | Echo mix |
 | Pitch hand: fist | Mute |
-| Expression hand: thumb–index opening | Volume, instead of palm height, if tests favour it |
+| Volume hand: thumb–index opening | Volume, instead of palm height, if tests favour it |
 
-**Pitch mapping**
-- **Active band:** only the middle of the screen, 15–85 % of its height, maps to the 2 octaves
-  (clamped outside it). Tracking is worse near the edges, and arms get tired at the top.
-- **Snap the slow movement, keep the wobble:** low-pass the hand's pitch (in semitones), snap that
-  slow part to the scale, then add back the fast difference scaled by `vibrato_keep` (~0.5).
-  Visitors land on notes, and a shaking hand still gives natural vibrato; a hard snap of the raw
-  pitch sounds robotic. `snap_strength` (1 = always on a note, 0 = classic theremin) blends the
-  snapped and unsnapped slow part.
-- **Hysteresis:** the snapped note changes only once the slow pitch has moved past the midpoint to
-  the next scale note by a margin (~0.15 semitone), so a hand resting between two notes doesn't
-  flicker between them.
-- **Re-entry:** when the pitch hand returns after a release, the pitch **jumps** to the new
-  target while the gain is still 0, then fades in. Gliding from the last note sounds like a siren.
+### 4.2 Pitch mapping: equal spacing per note, continuous between notes
 
-**Visuals**
-- Horizontal note lanes labeled with note names.
-- A glowing orb at the current pitch, with a trail, colored by pitch.
-- A **live oscilloscope strip** and **spectrum bars** (FFT of `engine.scope()`).
+The scale's notes over the 2 octaves (11 for a pentatonic scale, root to root two octaves up)
+get **equal heights** in the band, like evenly spaced frets. Each note's **mark** sits at the
+centre of its zone. The pitch moves **continuously** between marks, so sliding the finger glides
+from one note to the next, as on a fretless instrument.
 
-## 5. Mode 2 — Invisible Piano
+1. **Height → note position.** Index-tip height in the band maps linearly to a continuous note
+   position `p ∈ [−0.5, N − 0.5]`, clamped to `[0, N − 1]`. Integer `p` is a note's mark; with
+   the half-zone padding, the lowest and highest notes get as much room as the others.
+   (`N` = 11, band 70 % of the screen: one note every ~6.4 % of the height, ~46 px at 720p.)
+2. **Slow and fast parts.** On the main thread, at the camera rate, `p` is split into a slow part
+   (one-pole low-pass, ~150 ms) and a fast part (`p` minus the slow part): the hand's natural
+   shake.
+3. **Magnet.** The slow part is pulled towards the nearest mark by a continuous curve, never a
+   step. With `k = floor(p)` and `x = p − k`:
+   `p' = k + x − m · sin(2πx) / 2π`.
+   `m` (`magnet`, 0..1, default 0.8) is how sticky the marks are: at 0 the mapping is linear
+   (classic theremin); at 1 the curve is flat at each mark (the pitch rests on the note while the
+   finger is near it) and steepest halfway between. It is continuous and monotonic for every `m`
+   in 0..1, so there are no jumps and no flicker between notes, and it needs no hysteresis.
+4. **Vibrato.** The fast part is added back, scaled by `vibrato_keep` (~0.5). Near a mark the
+   magnet flattens the slow part, so this is what keeps a shaking hand sounding alive.
+5. **Note position → pitch.** Linear interpolation in semitones between the two neighbouring
+   scale notes. A 3-semitone step (A → C) covers the same height as a 2-semitone step (C → D),
+   so the glide is a little faster across the wider steps; that is the cost of even spacing.
+6. The resulting MIDI target goes to the engine, which glides to it in semitones (§2).
+
+`magnet` and `vibrato_keep` are in config; the operator can set `magnet = 0` for a fretless
+classic theremin. **Re-entry:** when the pitch hand returns after a release, the pitch **jumps**
+to the new target while the gain is still 0, then fades in. Gliding from the last note sounds
+like a siren.
+
+### 4.3 Visuals and cues
+
+**Pitch zone**
+- **Note marks:** one horizontal line per scale note across the pitch zone, labeled with its
+  note name (A3, C4, D4, …) at the outer edge. The **root notes** (A3, A4, A5) are drawn thicker
+  and brighter, like the double dots at a guitar's 12th fret.
+- **Current note:** the mark nearest the current pitch lights up, more brightly the closer the
+  pitch is to it; a full glow means "on the note". The pitch's exact position is the orb's height,
+  so a visitor sees where the finger is relative to the marks.
+- **Orb:** a glowing orb at the index tip, with a trail, colored by pitch. Its look follows the
+  timbre: round and soft for sine, sharper and with a jagged halo for saw.
+
+**Volume zone**
+- **Volume bar:** a vertical bar the height of the band that fills from min (bottom) to max (top)
+  as the palm rises, with a marker at the palm's height so hand and bar line up. The fill pulses
+  slightly with the actual output level, so the bar shows the sound itself.
+- No volume hand: the bar sits at the 0.7 default, dimmed.
+
+**Responses and hints**
+- A zone lights up faintly while a hand is in it; the divider makes clear that the side decides
+  the role.
+- A hand outside the band dims its cursor, and the hint line says where to go.
+- Onboarding hints, one at a time, each gone once done (booth shell): "Raise or lower your
+  finger on the right to change the note" → "Use your other hand on the left for volume" →
+  "Move your right hand sideways to change the sound" (only if timbre stays in v1).
+
+**Sound view:** a **live oscilloscope strip** and **spectrum bars** (FFT of `engine.scope()`)
+along the bottom edge, below the band.
+
+## 5. Invisible Piano scene (`scenes/piano.py`, direction only)
 
 - 5–8 vertical key columns (one per scale degree) in the lower part of the screen, labeled. The
   index fingertip's column is highlighted.
@@ -159,7 +218,7 @@ above. The features already exist in `gestures/features.py` (`pinch_ratio`, `pal
 ## 6. Discover layer (Vision overlay additions)
 
 A **"Your hand → sound"** panel shows each mapping live, as input value → output value:
-- `hand height 0.62 → A4 · 440 Hz`
+- `finger height 0.62 → A4 · 440 Hz (+12 cents)`
 - `other hand height 0.40 → volume 0.40`
 - `palm tilt 18° → filter 2.1 kHz` (once palm roll is mapped, B.5)
 
@@ -168,9 +227,9 @@ oscilloscope shows that sound itself is a list of numbers ("48,000 numbers per s
 
 ## 7. Scene and navigation
 
-`scenes/synth.py`, with dwell buttons **Theremin / Piano** and **Change scale** added to the top
-strip, and a **🎵 Music** button in the main navigation. Operator keys: `4` Synth, `S` cycle scale,
-`M` mute all.
+Two scenes, following the booth-minimum shell (PLAN D14: staff switch scenes, dwell buttons are
+parked): `scenes/theremin.py` on operator key `4` and, later, `scenes/piano.py` on `5`. Operator
+keys inside them: `S` cycle scale (the note marks and labels follow), `M` mute all.
 
 ## 8. Milestones
 
@@ -179,8 +238,8 @@ strip, and a **🎵 Music** button in the main navigation. Operator keys: `4` Sy
 | B.0 | **Spike** (throwaway, `--audio-spike`): live sine follows the pitch hand, in any scene; HUD shows underruns, callback time and gaps. 10 min in Geometry with many shapes, on the MacBook and the Ubuntu laptop, at 256 / 512 / 1024 samples, with and without a 1 ms switch interval | Block size and switch interval chosen from measurements; fallback (§2) needed or not. Results in `docs/measurements.md` |
 | B.1 | Engine, offline: mono voice (oscillators, semitone glide, gain ramps), delay, master; `scales.py`; WAV render; tests; `scipy` dependency + filter | Rendered WAVs sound clean (no clicks or aliasing at high notes) |
 | B.2 | Live stream owned by the app (replaces the spike), underrun counter and latency in HUD; 10-min stress test with Geometry rendering | 0 underruns in 10 min, or fallback (§2) implemented |
-| B.3 | Theremin scene with the v1 controls (§4); user tests | New users play a recognizable melody within 1 min |
-| B.4 | Theremin visuals: lanes, orb, oscilloscope, spectrum | 60 FPS maintained |
+| B.3 | Theremin scene (§4): zones, band, note marks, volume bar, v1 controls, pitch mapping (§4.2), hints; user tests | New users play a recognizable melody within 1 min |
+| B.4 | Theremin polish: orb with trail and timbre look, mark glow, oscilloscope, spectrum | 60 FPS maintained |
 | B.5 | Theremin extra controls from the candidates (§4), only those the B.3 tests justify | – |
 | B.6 | Invisible Piano: envelope, voice pool; refine §5 first | Two-hand playing works; no stuck notes on hand loss |
 | B.7 | Discover panel, scale switching, polish | – |
@@ -191,8 +250,13 @@ strip, and a **🎵 Music** button in the main navigation. Operator keys: `4` Sy
 - **DSP, offline:** sine frequency via FFT peak; envelope shape; voice stealing; no NaN or Inf;
   output within [−1, 1] after the soft clip.
 - **Parameter-ramp continuity:** no discontinuity larger than ε between blocks.
-- **Scales:** quantize and snap tables; snap hysteresis (a pitch resting at a note midpoint stays
-  on one note); slow-snap keeps the fast wobble scaled by `vibrato_keep`.
+- **Scales:** note tables; `note_position` puts each mark at the centre of an equal zone, with
+  the end notes' zones as large as the others; `position_to_midi` hits every note exactly at its
+  mark and is linear in semitones between; `magnet` is continuous and monotonic for `m` in 0..1,
+  fixes every mark, and is flat at the marks for `m = 1`; the fast part is added back scaled by
+  `vibrato_keep`.
+- **Pitch hand x:** moving the pitch hand sideways changes the timbre target and never the pitch
+  target.
 - **Theremin re-entry:** pitch hand lost, then found an octave away → no glide (the pitch jumps
   while the gain is 0).
 - **Fixture WAVs:** record `theremin_sweep` (slow up and down) and `theremin_hand_loss`; a test
