@@ -70,3 +70,9 @@ def test_mapping_rightmost_hand_is_pitch_other_palm_is_volume():
     assert vol == 0.7 and midi > spike.NOTES[5]
     midi, vol = targets([(0.8, 0.84, 0.5), (0.2, 0.5, 0.15)])  # left palm at the band top
     assert midi == spike.NOTES[0] and vol == 1.0
+
+
+def test_process_spike_reports_a_device_that_cannot_open():
+    s = spike.ProcessSpike()
+    assert not s.open(device=10_000)  # no such device: the child fails, the app goes on
+    assert s.error and s._proc is None

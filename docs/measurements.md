@@ -112,4 +112,31 @@ open), `SDL_VIDEODRIVER=dummy`. 90 s per run, PortAudio's default output (PipeWi
   dummy video driver skips the real `flip()`. The live runs with hands (B.0 done-when) still
   decide the block size.
 
+### Phase B.0: live underruns with two hands, and the cause (2026-11-04)
+
+Live spike runs with hands crackled and counted underruns, worse with two hands in view.
+
+- **Not MediaPipe:** a probe thread sleeping 1 ms in a loop woke at most 0.3 ms late while the
+  main thread ran the recognizer (21.6 ms mean inference, 37.5 ms max). MediaPipe releases the
+  GIL during inference.
+- **The main thread's Python work:** replaying `two_hand_stretch` (no inference, dummy video)
+  raised the worst callback from 2.2 ms (one hand) to 7.2 ms, for work that takes ~0.2 ms. The
+  callback loses the GIL mid-block and waits up to a switch interval to get it back. Live adds
+  the camera background and the real `flip()`, which tips it into underruns.
+
+Same replay, Geometry, 30 s, silent:
+
+| Setup | Block | Callback mean / max ms | Largest gap ms |
+|---|---|---|---|
+| In-process, switch interval 5 ms (default) | 256 | 0.20 / 7.2 | 13.7 |
+| In-process, switch interval 5 ms | 512 | 0.75 / 7.2 | 17.6 |
+| In-process, switch interval 1 ms | 256 | 0.21 / 3.2 | 9.8 |
+| In-process, switch interval 0.5 ms | 256 | 0.19 / 1.4 | 8.5 |
+| **Separate process** (`--spike-process`), 5 ms | 256 | 0.19 / **0.55** | **5.7** |
+| **Separate process**, 5 ms | 512 | 0.24 / **0.61** | **10.9** |
+
+A shorter switch interval helps but only shrinks the window; the main thread's load grows in
+Phase C. In its own process the callback never waits for the GIL: the worst callback is 10 % of a
+256-sample block, and callbacks arrive once per block with no bursts.
+
 ## Ubuntu laptop (x86_64): pending

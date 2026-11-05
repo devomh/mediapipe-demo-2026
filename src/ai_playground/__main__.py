@@ -63,6 +63,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--spike-gain", type=float, default=0.3, help="spike level, 0 = silent (default 0.3)"
     )
     spike.add_argument(
+        "--spike-process",
+        action="store_true",
+        help="run the spike's audio stream in a separate process (its own GIL)",
+    )
+    spike.add_argument(
         "--switch-interval",
         type=float,
         metavar="MS",
@@ -199,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             no_frames_hint=hint,
             audio_spike_block=args.audio_spike,
             audio_spike_gain=args.spike_gain,
+            audio_spike_process=args.spike_process,
         )
         return App(cfg, source, opts).run()
     finally:

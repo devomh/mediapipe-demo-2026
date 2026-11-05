@@ -65,6 +65,7 @@ class RunOptions:
     no_frames_hint: str = ""  # shown if a live source sends nothing within the timeout
     audio_spike_block: int | None = None  # B.0 spike: sine follows the pitch hand (Phase B §8)
     audio_spike_gain: float = 0.3
+    audio_spike_process: bool = False  # run the spike's stream in a child process
 
 
 class App:
@@ -101,9 +102,10 @@ class App:
         self.pacer = FramePacer(cfg.display.target_fps)
         self.recorder: Recorder | None = None
         self._rec_started = 0.0
-        self.spike: audio_spike.SpikeSynth | None = None
+        self.spike: audio_spike.SpikeSynth | audio_spike.ProcessSpike | None = None
         if opts.audio_spike_block is not None:
-            self.spike = audio_spike.SpikeSynth(opts.audio_spike_block, opts.audio_spike_gain)
+            kind = audio_spike.ProcessSpike if opts.audio_spike_process else audio_spike.SpikeSynth
+            self.spike = kind(opts.audio_spike_block, opts.audio_spike_gain)
             if not self.spike.open():
                 self.spike = None
         self.scene: Scene | None = None

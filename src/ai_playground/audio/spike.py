@@ -201,3 +201,100 @@ def log_line(s: SpikeStats, elapsed_s: float) -> str:
         f"{s.cb_max_ms:.3f} ms, gap max {s.gap_max_ms:.1f} ms (block {s.block_ms:.1f} ms), "
         f"output latency {s.out_latency_ms:.1f} ms"
     )
+
+
+# --- separate process (spec §2 fallback) ----------------------------------------------------------
+# Shared float slots. The parent writes the targets and the run flag; the child writes the rest.
+_MIDI, _GAIN, _RUN, _STATE = 0, 1, 2, 3  # _STATE: 0 starting, 1 running, -1 failed
+_STATS = 4  # SpikeStats fields, in order, from here
+_SLOTS = _STATS + len(SpikeStats.__slots__)
+
+
+class ProcessSpike:
+    """Same interface as SpikeSynth, but the stream runs in a child process with its own GIL, so
+    the main thread's Python work can't delay the callback. Targets and stats go through a shared
+    float array (no locks: one writer per slot)."""
+
+    START_TIMEOUT_S = 10.0
+
+    def __init__(self, blocksize: int = 512, gain: float = 0.3) -> None:
+        import multiprocessing as mp
+
+        self.blocksize, self.gain = blocksize, gain
+        self._ctx = mp.get_context("spawn")  # never fork a process running MediaPipe threads
+        self._shared = self._ctx.RawArray("d", _SLOTS)
+        self._proc = None
+        self.error: str | None = None
+
+    def open(self, device: int | str | None = None) -> bool:
+        self._shared[_RUN] = 1.0
+        self._proc = self._ctx.Process(
+            target=_child_main,
+            args=(self._shared, self.blocksize, self.gain, device, _switch_interval()),
+            name="audio-spike",
+            daemon=True,
+        )
+        self._proc.start()
+        deadline = time.monotonic() + self.START_TIMEOUT_S
+        while self._shared[_STATE] == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if self._shared[_STATE] != 1:
+            self.error = "audio process did not start (see its log)"
+            log.warning("audio spike: %s", self.error)
+            self.close()
+            return False
+        log.info("audio spike: running in process %d", self._proc.pid)
+        return True
+
+    def set(self, midi: float | None, volume: float) -> None:
+        if midi is None:
+            self._shared[_GAIN] = 0.0
+        else:
+            self._shared[_MIDI] = midi
+            self._shared[_GAIN] = volume
+
+    def stats(self) -> SpikeStats:
+        v = self._shared[_STATS:_SLOTS]
+        return SpikeStats(int(v[0]), int(v[1]), int(v[2]), *v[3:])
+
+    def close(self) -> None:
+        if self._proc is not None:
+            self._shared[_RUN] = 0.0
+            self._proc.join(timeout=2.0)
+            if self._proc.is_alive():
+                self._proc.terminate()
+            self._proc = None
+
+
+class _SharedTargetSynth(SpikeSynth):
+    def __init__(self, shared, *args) -> None:
+        super().__init__(*args)
+        self._shared = shared
+
+    def callback(self, outdata, frames, time_info, status) -> None:
+        self.target_midi = self._shared[_MIDI]
+        self.target_gain = self._shared[_GAIN]
+        super().callback(outdata, frames, time_info, status)
+
+
+def _child_main(shared, blocksize: int, gain: float, device, switch_interval: float) -> None:
+    import os
+    import sys
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    sys.setswitchinterval(switch_interval)
+    parent = os.getppid()
+    synth = _SharedTargetSynth(shared, blocksize, gain)
+    if not synth.open(device):
+        shared[_STATE] = -1.0
+        return
+    shared[_STATE] = 1.0
+    try:
+        while shared[_RUN] == 1.0 and os.getppid() == parent:  # parent gone: stop
+            s = synth.stats()
+            shared[_STATS:_SLOTS] = [float(getattr(s, f)) for f in SpikeStats.__slots__]
+            time.sleep(0.05)
+    finally:
+        synth.close()
