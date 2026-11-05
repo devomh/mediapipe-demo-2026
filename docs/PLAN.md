@@ -130,7 +130,11 @@ to play). Waveform/spectrum view as the "discover" layer.
   dedicated Theremin scene with pitch and volume zones, three v1 controls, evenly spaced note
   marks with the pitch continuous between them (a "magnet" pulls it towards the notes), a volume
   bar, `scipy` for the filter ([Phase B §4, §8](specs/phaseB-airsynth.md#8-milestones)).
-- **Next:** B.0 measurements on the MacBook and the Ubuntu laptop (`--audio-spike`).
+- B.0 on the Ubuntu desktop: in-process audio crackled live with two hands (the callback waits
+  for the GIL behind the main thread); in its own process, 0 underruns at 256 and 512 samples.
+  The engine will run in a separate process ([Phase B §2](specs/phaseB-airsynth.md)).
+- **Next:** the same live spike run on the MacBook (`--audio-spike 256 --spike-process`, then
+  512), then B.1.
 
 **Exit criteria**
 
@@ -165,7 +169,7 @@ operations checklist.
 |------|-----------|------------|
 | Venue lighting or backlight hurts tracking | High | Test in the venue early; ring light in the kit; `min_detection_confidence` in config |
 | Bystanders' hands get tracked | High | Ignore hands smaller than `min_hand_size` (far from camera); mark the floor spot |
-| Python audio callback underruns under rendering load | Medium | Measured first (B.0 spike); larger block size, shorter GIL switch interval; fall back to running audio in a separate process ([Phase B §2](specs/phaseB-airsynth.md#2-audio-engine-audioenginepy-audiovoicespy-audiodsppy)) |
+| Python audio callback underruns under rendering load | Happened (B.0) | The engine runs in its own process, so the callback never waits for the main thread's GIL; block size 1024 if B.2 still shows underruns ([Phase B §2](specs/phaseB-airsynth.md#2-audio-engine-audioenginepy-audiovoicespy-audiodsppy)) |
 | macOS camera permission or wrong camera index on event day | Medium | Startup check with clear on-screen error; `--list-cameras`; ops checklist |
 | Gestures feel unreliable for new users | Medium | Small gesture vocabulary, hysteresis, onboarding hints, test with new users at every phase |
 | Air-written characters look unlike EMNIST's pen scans (wobbly, even stroke width, slanted), so accuracy drops | High | One framing function shared by training and the app; augmentation that imitates air-writing; measure on our own air-written set before building the UI polish; fine-tune on it if needed ([Air Writing §5](specs/phaseA-air-writing.md#5-model)) |

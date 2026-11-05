@@ -139,4 +139,14 @@ A shorter switch interval helps but only shrinks the window; the main thread's l
 Phase C. In its own process the callback never waits for the GIL: the worst callback is 10 % of a
 256-sample block, and callbacks arrive once per block with no bursts.
 
+**Live, separate process** (`--spike-process`), Geometry, two hands moving, audible:
+
+| Block | Duration | Underruns | Callback mean / max ms | Largest gap ms | Output latency ms |
+|---|---|---|---|---|---|
+| 256 (5.3 ms) | 77 s | 0 | 0.067 / 0.27 | 5.6 | 10.7 |
+| 512 (10.7 ms) | 60 s | 0 | 0.105 / 0.40 | 11.0 | 10.7 |
+
+Decision (B.0, Ubuntu desktop): the engine runs in its own process. 512 is the default: the
+same reported latency as 256 here, with twice the headroom. MacBook run pending.
+
 ## Ubuntu laptop (x86_64): pending

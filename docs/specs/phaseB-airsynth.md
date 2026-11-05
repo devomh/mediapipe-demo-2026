@@ -28,8 +28,10 @@ pool and envelopes come with the Piano.
 ## 2. Audio engine (`audio/engine.py`, `audio/voices.py`, `audio/dsp.py`)
 
 **Stream:** `sounddevice.OutputStream(samplerate=48000, channels=2, dtype="float32",
-blocksize=512, latency="low")`. 512 samples is about 10.7 ms per block. Configurable; B.0
-measures 256, 512 and 1024 and sets the default.
+blocksize=512, latency="low")`. 512 samples is about 10.7 ms per block. Configurable. *B.0
+(Ubuntu desktop):* in its own process both 256 and 512 run with 0 underruns live, and PipeWire
+reports 10.7 ms output latency for both, so 512 keeps more headroom for free. The MacBook run
+decides whether 256 saves latency on CoreAudio.
 
 *Latency budget:* camera-to-screen latency is already 34 ms (MacBook) and 46 ms (Ubuntu) mean
 ([measurements](../measurements.md)). Under the 100 ms exit criterion that leaves room for a
@@ -41,10 +43,15 @@ scene enter can click and takes 100 ms or more. Scenes that don't use audio leav
 idle callback writes zeros and returns. If the device can't open (no device, CI), the engine is a
 no-op, like `Sfx`: sound never stops the exhibit.
 
-**GIL:** the callback is Python, so it must get the GIL every block. Python's default thread
-switch interval is 5 ms (`sys.getswitchinterval()`), about one whole 256-sample block, so the
-audio thread can wait that long behind the main thread. B.0 measures with and without
-`sys.setswitchinterval(0.001)`; if it helps, the app sets it at startup.
+**The engine runs in its own process** (decided in B.0, [measurements](../measurements.md)).
+The callback is Python, so in the app's process it must win the GIL from the main thread every
+block. Live with two hands, the main thread's work (tracking, gestures, Geometry, drawing) made
+it crackle: the callback lost the GIL mid-block and waited up to a switch interval (5 ms) to get
+it back. MediaPipe is not the cause; it releases the GIL during inference. A shorter switch
+interval only narrowed the window. In a spawned child process (`multiprocessing`, `spawn` on both
+platforms: never fork a process running MediaPipe's threads) the callback has its own GIL: 0
+underruns live, worst callback under 4 % of a block. The child imports only NumPy, sounddevice
+and the engine modules, and stops when the parent goes away.
 
 **Callback contract:**
 - Vectorized NumPy only: no locks, no logging, no allocation-heavy work.
@@ -67,20 +74,25 @@ with the Piano)
 | Reverb | *Stretch:* Schroeder combs (delays > block size, vectorized) + allpasses via `lfilter` |
 | Master | Gain → `tanh` soft clip → output; a copy of the last ~2048 samples goes to a ring buffer for visualization |
 
-**Thread interface (main → audio)**
-- `engine.set(param, value)` writes targets: plain float attributes, atomic under the GIL.
-- `engine.note_on(...)` / `note_off(...)` push to a bounded `deque`, drained at the start of
-  each callback.
-- `engine.scope()` returns a copy of the visualization buffer.
+**Process interface (app ↔ audio process)**: `AudioEngine` in the app is a thin proxy; scenes
+never see the process.
+- `engine.set(param, value)` writes targets into a shared float array (`RawArray` or
+  `shared_memory`), one slot per parameter. One writer per slot, so no locks; the callback reads
+  the targets at the start of each block.
+- `engine.note_on(...)` / `note_off(...)` go through a `multiprocessing.Queue`, drained without
+  blocking at the start of each callback.
+- `engine.scope()` returns a copy of a shared ring buffer of the last ~2048 output samples. The
+  child writes it each block; a torn read only affects one drawn frame of the oscilloscope.
+- `engine.stats()`: underflows, callback time, gaps and output latency, written by the child into
+  the shared array for the HUD.
+- If the child fails to start or dies, the proxy logs once and becomes a no-op (sound never stops
+  the exhibit); the HUD shows "audio off".
 
-**Offline mode:** `engine.render(n_frames)` runs the same code without a stream. It is used by
-tests and to write WAV files for listening checks.
+**Offline mode:** the synthesis core (`render(n_frames)`) runs the same code in-process without
+a stream or a child. It is used by tests and to write WAV files for listening checks.
 
-**Fallback if underruns persist (measured in B.0, confirmed in B.2):**
-1. raise `blocksize` to 512;
-2. move the engine into a separate process (`multiprocessing`). Parameters go through a
-   `shared_memory` float array, note events through a `Queue`. The `AudioEngine` interface stays
-   identical, so scenes don't change.
+**If underruns still appear (B.2 stress test):** raise `blocksize` to 1024; the latency budget
+above allows it.
 
 **Platform notes**
 - Ubuntu needs `libportaudio2`. With PipeWire, if the default quantum adds latency, try
@@ -235,9 +247,9 @@ keys inside them: `S` cycle scale (the note marks and labels follow), `M` mute a
 
 | # | Milestone | Done when |
 |---|-----------|-----------|
-| B.0 | **Spike** (throwaway, `--audio-spike`): live sine follows the pitch hand, in any scene; HUD shows underruns, callback time and gaps. 10 min in Geometry with many shapes, on the MacBook and the Ubuntu laptop, at 256 / 512 / 1024 samples, with and without a 1 ms switch interval | Block size and switch interval chosen from measurements; fallback (§2) needed or not. Results in `docs/measurements.md` |
+| B.0 | **Spike** (throwaway, `--audio-spike`): live sine follows the pitch hand, in any scene; HUD shows underruns, callback time and gaps. Live in Geometry with two hands, on the Ubuntu desktop and the MacBook | *Ubuntu desktop done:* in-process crackles with two hands (GIL); a separate process (`--spike-process`) gives 0 underruns at 256 and 512. MacBook run pending (block size). Results in `docs/measurements.md` |
 | B.1 | Engine, offline: mono voice (oscillators, semitone glide, gain ramps), delay, master; `scales.py`; WAV render; tests; `scipy` dependency + filter | Rendered WAVs sound clean (no clicks or aliasing at high notes) |
-| B.2 | Live stream owned by the app (replaces the spike), underrun counter and latency in HUD; 10-min stress test with Geometry rendering | 0 underruns in 10 min, or fallback (§2) implemented |
+| B.2 | Engine in its own process, owned by the app (replaces the spike), underrun counter and latency in HUD; 10-min stress test with Geometry rendering | 0 underruns in 10 min |
 | B.3 | Theremin scene (§4): zones, band, note marks, volume bar, v1 controls, pitch mapping (§4.2), hints; user tests | New users play a recognizable melody within 1 min |
 | B.4 | Theremin polish: orb with trail and timbre look, mark glow, oscilloscope, spectrum | 60 FPS maintained |
 | B.5 | Theremin extra controls from the candidates (§4), only those the B.3 tests justify | – |
