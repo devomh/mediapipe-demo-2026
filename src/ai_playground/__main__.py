@@ -50,6 +50,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--display", type=int, help="display index (overrides [display].display_index)")
     p.add_argument("--max-frames", type=int, help=argparse.SUPPRESS)  # smoke tests
     p.add_argument("--debug", action="store_true", help="debug logging, including events")
+    spike = p.add_argument_group("B.0 audio spike (Phase B spec §8, throwaway)")
+    spike.add_argument(
+        "--audio-spike",
+        type=int,
+        nargs="?",
+        const=512,
+        metavar="BLOCK",
+        help="play a sine that follows the pitch hand; BLOCK samples per callback (default 512)",
+    )
+    spike.add_argument(
+        "--spike-gain", type=float, default=0.3, help="spike level, 0 = silent (default 0.3)"
+    )
+    spike.add_argument(
+        "--switch-interval",
+        type=float,
+        metavar="MS",
+        help="Python's GIL switch interval in ms (default 5)",
+    )
     return p.parse_args(argv)
 
 
@@ -120,6 +138,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {msg}", file=sys.stderr)
         return 1
 
+    if args.switch_interval is not None:
+        sys.setswitchinterval(args.switch_interval / 1000)
+
     from ai_playground.app import SCENES, App, RunOptions, show_error
 
     if args.scene not in SCENES:
@@ -176,6 +197,8 @@ def main(argv: list[str] | None = None) -> int:
             recording_meta=meta,
             max_frames=args.max_frames,
             no_frames_hint=hint,
+            audio_spike_block=args.audio_spike,
+            audio_spike_gain=args.spike_gain,
         )
         return App(cfg, source, opts).run()
     finally:

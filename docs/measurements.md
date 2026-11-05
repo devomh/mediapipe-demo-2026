@@ -86,4 +86,30 @@ memory sampled with `pidstat` over the same period (20 s / 15 s).
 - RSS grew 345 → 404 MB between the runs, which were about 3 minutes apart. That is one sample,
   not a trend; the 30-minute soak test (A.9) is where to check for a leak.
 
+### Phase B.0: audio callback under replay load (2026-11-04)
+
+`--audio-spike BLOCK --spike-gain 0` (the sine is synthesized, then scaled to zero), Geometry
+scene replaying `grab_and_throw` on loop at 1.5× speed, sound effects at volume 0 (mixer still
+open), `SDL_VIDEODRIVER=dummy`. 90 s per run, PortAudio's default output (PipeWire).
+
+| Block (ms) | Switch interval | Underruns | Callback mean / max ms | Largest gap ms | Output latency ms |
+|---|---|---|---|---|---|
+| 256 (5.3) | 5 ms (default) | 0 | 0.16 / 2.2 | 9.2 | 10.7 |
+| 256 (5.3) | 1 ms | 0 | 0.15 / 2.1 | 7.8 | 10.7 |
+| 512 (10.7) | 5 ms (default) | 0 | 0.48 / 4.6 | 14.7 | 10.7 |
+| 512 (10.7) | 1 ms | 0 | 0.50 / 4.2 | 13.0 | 10.7 |
+| 1024 (21.3) | 5 ms (default) | 0 | 0.67 / 6.7 | 26.4 | 21.3 |
+| 1024 (21.3) | 1 ms | 0 | 0.76 / 6.0 | 25.2 | 21.3 |
+
+- No underruns at any block size. The worst callback used 41 % of a 256-sample block, 43 % of a
+  512 one and 31 % of a 1024 one.
+- A 1 ms switch interval shortened the largest gap by 1–2 ms and changed nothing else. Not worth
+  setting until a live run shows it matters.
+- Callbacks arrive in bursts: the largest gap is about 1.2–1.7 blocks without any underrun, so a
+  gap alone is not a glitch.
+- PipeWire reports 10.7 ms output latency for both 256 and 512, so 256 saves no latency here.
+- **Not covered:** replay mode has no MediaPipe inference (the worker thread's GIL use), and the
+  dummy video driver skips the real `flip()`. The live runs with hands (B.0 done-when) still
+  decide the block size.
+
 ## Ubuntu laptop (x86_64): pending
