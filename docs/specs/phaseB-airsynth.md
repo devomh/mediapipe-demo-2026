@@ -38,10 +38,20 @@ decides whether 256 saves latency on CoreAudio.
 1024-sample block (21 ms) plus the device buffer. The Theremin tolerates that; only the Piano's
 note onsets would notice, so prefer the larger block over underruns.
 
-**Stream lifetime:** the app opens the stream once at startup and keeps it open. Opening it on
-scene enter can click and takes 100 ms or more. Scenes that don't use audio leave it idle; the
-idle callback writes zeros and returns. If the device can't open (no device, CI), the engine is a
-no-op, like `Sfx`: sound never stops the exhibit.
+**Lifetime: the app owns the engine, scenes use it.** The app starts the audio process once at
+startup and keeps it running in every scene; it goes in `AppContext.audio`, next to `sfx`.
+Starting it on scene enter would delay the first note and can click: the process takes ~0.1 s to
+start (0.46 s cold) and ~80 ms to stop on the Ubuntu desktop, and `spawn` is slower on macOS.
+Scenes that don't use audio leave it idle; the idle callback writes zeros and returns (about 94
+callbacks a second at 512 samples, negligible). Phase C's Orchestra uses the same engine.
+
+- **Non-blocking start:** the app starts the process and carries on; the window opens at once.
+  The proxy becomes ready when the child reports its stream is running; until then `set` is a
+  no-op and the HUD shows "audio starting". (`ProcessSpike.open()` in the spike waits instead.)
+- **Shutdown:** the app's `finally` stops the child (run flag, join, then terminate), on every
+  exit path, including the error screens. The child also stops when its parent goes away.
+- If the device can't open (no device), or `[audio] enabled = false` (tests, CI), the engine is a
+  no-op, like `Sfx`: sound never stops the exhibit.
 
 **The engine runs in its own process** (decided in B.0, [measurements](../measurements.md)).
 The callback is Python, so in the app's process it must win the GIL from the main thread every
@@ -83,6 +93,11 @@ never see the process.
   blocking at the start of each callback.
 - `engine.scope()` returns a copy of a shared ring buffer of the last ~2048 output samples. The
   child writes it each block; a torn read only affects one drawn frame of the oscilloscope.
+- `engine.state()`: what the sound is actually doing, for the visuals (§4.3), written by the
+  child each block into the shared array: the **current pitch** after the glide (the orb and the
+  glowing mark), the **output level** (RMS of the block, for the volume bar's pulse) and the
+  current gain. Scenes read it in `draw()` at 60 Hz; a torn read affects one drawn frame only, so
+  there are no locks.
 - `engine.stats()`: underflows, callback time, gaps and output latency, written by the child into
   the shared array for the HUD.
 - If the child fails to start or dies, the proxy logs once and becomes a no-op (sound never stops
@@ -93,6 +108,9 @@ a stream or a child. It is used by tests and to write WAV files for listening ch
 
 **If underruns still appear (B.2 stress test):** raise `blocksize` to 1024; the latency budget
 above allows it.
+
+**Config** (`[audio]`): `enabled`, `device`, `blocksize`, `master_volume`. Like every section,
+it has its dataclass in `config.py` (unknown keys are an error).
 
 **Platform notes**
 - Ubuntu needs `libportaudio2`. With PipeWire, if the default quantum adds latency, try
@@ -114,7 +132,28 @@ above allows it.
 ## 4. Theremin scene (`scenes/theremin.py`)
 
 A dedicated scene (operator key `4`), with nothing else on screen to compete with the instrument.
-The Piano gets its own scene later (§5).
+The Piano gets its own scene later (§5). The scene doesn't own the audio: it uses the app's
+engine from `AppContext.audio` (§2).
+
+### 4.0 Scene lifecycle and code layout
+
+- **`enter()`:** load the scale and band from `[theremin]`, hide the Vision overlay
+  (`show_vision = False`, as in Geometry and Writing; `V` still toggles it) and dim the camera
+  background (`[theremin] background_brightness`).
+- **`exit()`:** fade the gain to 0 over the release time (300 ms) rather than cutting it, so
+  switching scenes mid-note neither clicks nor leaves a drone. Other scenes never touch the
+  engine, so it stays silent there.
+- **`idle_reset()`:** the sound has already faded (no pitch hand); reset the hints and the scale
+  to the defaults.
+- **Camera stall:** `handle()` runs only when a camera frame arrives. If none has arrived for
+  ~200 ms (camera error, USB dropout), `update(dt)` fades the gain to 0, so the last note doesn't
+  hold forever.
+- **Code layout:** the pure maths (note positions, magnet, interpolation, slow/fast split) is in
+  `audio/scales.py` and a small mapping module with no pygame, so it is unit-tested alone. The
+  scene reads `HandState`s in `handle()` and calls `engine.set(...)`. The slow/fast split runs on
+  camera time (`t_capture`), not render `dt`, so it is the same at any frame rate.
+- **Config** (`[theremin]`): band, `magnet`, `vibrato_keep`, glide, scale, root, octaves,
+  default volume, release time, background brightness.
 
 ### 4.1 Zones and hand roles
 
@@ -240,8 +279,18 @@ oscilloscope shows that sound itself is a list of numbers ("48,000 numbers per s
 ## 7. Scene and navigation
 
 Two scenes, following the booth-minimum shell (PLAN D14: staff switch scenes, dwell buttons are
-parked): `scenes/theremin.py` on operator key `4` and, later, `scenes/piano.py` on `5`. Operator
-keys inside them: `S` cycle scale (the note marks and labels follow), `M` mute all.
+parked): `scenes/theremin.py` on operator key `4` (added to `SCENE_KEYS`) and, later,
+`scenes/piano.py` on `5`.
+
+- **`S` cycle scale:** the note marks and labels follow. Available only in scenes that have a
+  scale, like `T` (collect) is only in Writing.
+- **`M` mute all:** today it toggles only the sound effects (`Sfx`); from B.2 it mutes the engine
+  too, and the keys overlay shows one state for both.
+- **HUD:** the engine's stats line (underruns, callback time, output latency) is app-level and
+  shows in every scene, because Phase C uses the engine in other scenes too.
+- **Two audio outputs:** Geometry's effects stay on `pygame.mixer`, so the app has two outputs
+  open. `[audio] device` picks the engine's output, but the mixer uses the system default, so at
+  the venue the **system default output must be the external speakers** (ops checklist).
 
 ## 8. Milestones
 
@@ -249,7 +298,7 @@ keys inside them: `S` cycle scale (the note marks and labels follow), `M` mute a
 |---|-----------|-----------|
 | B.0 | **Spike** (throwaway, `--audio-spike`): live sine follows the pitch hand, in any scene; HUD shows underruns, callback time and gaps. Live in Geometry with two hands, on the Ubuntu desktop and the MacBook | *Ubuntu desktop done:* in-process crackles with two hands (GIL); a separate process (`--spike-process`) gives 0 underruns at 256 and 512. MacBook run pending (block size). Results in `docs/measurements.md` |
 | B.1 | Engine, offline: mono voice (oscillators, semitone glide, gain ramps), delay, master; `scales.py`; WAV render; tests; `scipy` dependency + filter | Rendered WAVs sound clean (no clicks or aliasing at high notes) |
-| B.2 | Engine in its own process, owned by the app (replaces the spike), underrun counter and latency in HUD; 10-min stress test with Geometry rendering | 0 underruns in 10 min |
+| B.2 | Engine in its own process, owned by the app (`AppContext.audio`, non-blocking start, `[audio]` config, `M` mutes all), underrun counter and latency in HUD; 10-min stress test with Geometry rendering. Removes the spike: `--audio-spike`, `--spike-gain`, `--spike-process`, `--switch-interval` and the mapping in `App._process`; its process code (spawn, shared array, stop with the parent) moves into the engine | 0 underruns in 10 min |
 | B.3 | Theremin scene (§4): zones, band, note marks, volume bar, v1 controls, pitch mapping (§4.2), hints; user tests | New users play a recognizable melody within 1 min |
 | B.4 | Theremin polish: orb with trail and timbre look, mark glow, oscilloscope, spectrum | 60 FPS maintained |
 | B.5 | Theremin extra controls from the candidates (§4), only those the B.3 tests justify | – |
@@ -274,5 +323,12 @@ keys inside them: `S` cycle scale (the note marks and labels follow), `M` mute a
 - **Fixture WAVs:** record `theremin_sweep` (slow up and down) and `theremin_hand_loss`; a test
   replays each through tracker → mapping → offline `render()` and checks for clicks (no sample
   step above ε), NaN and stuck sound. The WAVs are also the listening check.
+- **Stub engine:** `App` tests run with `[audio] enabled = false` (no child process, no audio
+  device in CI); scene tests use a stub engine in `AppContext` that records the targets it gets.
+  Only one test starts the real child process (start, set, stats, stop; and a device that can't
+  open).
+- **Scene lifecycle (stub):** `exit()` mid-note sends gain 0 with the release ramp; no camera
+  frame for 200 ms → gain 0; `idle_reset()` restores the default scale; sideways movement changes
+  only the timbre target.
 - **Hand loss:** a `pinch_end` with `reason: lost` releases its note, so no stuck notes.
 - **Fixture-driven:** replay `right_pinch_x5` in Piano mode → 5 note-on/off pairs.
