@@ -11,10 +11,12 @@ from typing import Protocol
 
 import pygame
 
+from ai_playground.audio import spike as audio_spike
 from ai_playground.audio.sfx import Sfx
 from ai_playground.booth import HoldKey, IdleTimer
 from ai_playground.config import Config
 from ai_playground.gestures.engine import GestureEngine
+from ai_playground.gestures.features import INDEX_TIP
 from ai_playground.pacing import FramePacer
 from ai_playground.render import text, ui
 from ai_playground.render.background import Background
@@ -61,6 +63,9 @@ class RunOptions:
     recording_meta: dict | None = None
     max_frames: int | None = None  # stop after this many rendered frames (smoke tests)
     no_frames_hint: str = ""  # shown if a live source sends nothing within the timeout
+    audio_spike_block: int | None = None  # B.0 spike: sine follows the pitch hand (Phase B §8)
+    audio_spike_gain: float = 0.3
+    audio_spike_process: bool = False  # run the spike's stream in a child process
 
 
 class App:
@@ -97,6 +102,12 @@ class App:
         self.pacer = FramePacer(cfg.display.target_fps)
         self.recorder: Recorder | None = None
         self._rec_started = 0.0
+        self.spike: audio_spike.SpikeSynth | audio_spike.ProcessSpike | None = None
+        if opts.audio_spike_block is not None:
+            kind = audio_spike.ProcessSpike if opts.audio_spike_process else audio_spike.SpikeSynth
+            self.spike = kind(opts.audio_spike_block, opts.audio_spike_gain)
+            if not self.spike.open():
+                self.spike = None
         self.scene: Scene | None = None
         self.switch_scene(opts.scene)
         self.running = True
@@ -280,6 +291,7 @@ class App:
             self.start_recording(self.opts.record_path)
         self.source.start()
         started = time.monotonic()
+        next_spike_log = started + 60.0
         seen_seq = 0
         try:
             while self.running:
@@ -322,6 +334,14 @@ class App:
                 status = "replay finished" if self.source.finished else ""
                 if getattr(self.source, "restarts", 0):
                     status = f"recognizer restarts {self.source.restarts}"
+                if self.spike is not None:
+                    spike_stats = self.spike.stats()
+                    status = "\n".join(
+                        line for line in (status, audio_spike.hud_line(spike_stats)) if line
+                    )
+                    if time.monotonic() >= next_spike_log:
+                        next_spike_log += 60.0
+                        log.info(audio_spike.log_line(spike_stats, time.monotonic() - started))
                 rec_s = None if self.recorder is None else time.monotonic() - self._rec_started
                 self.hud.draw(
                     self.surface, self.opts.source_label, self.hands_tracked, rec_s, status
@@ -344,6 +364,9 @@ class App:
             self.source.stop()
             self.stop_recording()
             self.sfx.close()
+            if self.spike is not None:
+                log.info(audio_spike.log_line(self.spike.stats(), time.monotonic() - started))
+                self.spike.close()
         return 0
 
     def _booth_update(self, dt: float) -> None:
@@ -367,6 +390,16 @@ class App:
         tracked = self.tracker.update(frame)
         self.hands_tracked = sum(1 for th in tracked if th.missed == 0)
         events, states = self.engine.update(tracked, frame.t_capture)
+        if self.spike is not None:
+            hands = [
+                (
+                    st.features.palm_center[0],
+                    float(st.tracked.hand.landmarks[INDEX_TIP, 1]),
+                    st.features.palm_center[1],
+                )
+                for st in states
+            ]
+            self.spike.set(*audio_spike.targets(hands))
         if events and log.isEnabledFor(logging.DEBUG):
             for e in events:
                 if not e.type.endswith("_move"):

@@ -86,4 +86,67 @@ memory sampled with `pidstat` over the same period (20 s / 15 s).
 - RSS grew 345 → 404 MB between the runs, which were about 3 minutes apart. That is one sample,
   not a trend; the 30-minute soak test (A.9) is where to check for a leak.
 
+### Phase B.0: audio callback under replay load (2026-11-04)
+
+`--audio-spike BLOCK --spike-gain 0` (the sine is synthesized, then scaled to zero), Geometry
+scene replaying `grab_and_throw` on loop at 1.5× speed, sound effects at volume 0 (mixer still
+open), `SDL_VIDEODRIVER=dummy`. 90 s per run, PortAudio's default output (PipeWire).
+
+| Block (ms) | Switch interval | Underruns | Callback mean / max ms | Largest gap ms | Output latency ms |
+|---|---|---|---|---|---|
+| 256 (5.3) | 5 ms (default) | 0 | 0.16 / 2.2 | 9.2 | 10.7 |
+| 256 (5.3) | 1 ms | 0 | 0.15 / 2.1 | 7.8 | 10.7 |
+| 512 (10.7) | 5 ms (default) | 0 | 0.48 / 4.6 | 14.7 | 10.7 |
+| 512 (10.7) | 1 ms | 0 | 0.50 / 4.2 | 13.0 | 10.7 |
+| 1024 (21.3) | 5 ms (default) | 0 | 0.67 / 6.7 | 26.4 | 21.3 |
+| 1024 (21.3) | 1 ms | 0 | 0.76 / 6.0 | 25.2 | 21.3 |
+
+- No underruns at any block size. The worst callback used 41 % of a 256-sample block, 43 % of a
+  512 one and 31 % of a 1024 one.
+- A 1 ms switch interval shortened the largest gap by 1–2 ms and changed nothing else. Not worth
+  setting until a live run shows it matters.
+- Callbacks arrive in bursts: the largest gap is about 1.2–1.7 blocks without any underrun, so a
+  gap alone is not a glitch.
+- PipeWire reports 10.7 ms output latency for both 256 and 512, so 256 saves no latency here.
+- **Not covered:** replay mode has no MediaPipe inference (the worker thread's GIL use), and the
+  dummy video driver skips the real `flip()`. The live runs with hands (B.0 done-when) still
+  decide the block size.
+
+### Phase B.0: live underruns with two hands, and the cause (2026-11-04)
+
+Live spike runs with hands crackled and counted underruns, worse with two hands in view.
+
+- **Not MediaPipe:** a probe thread sleeping 1 ms in a loop woke at most 0.3 ms late while the
+  main thread ran the recognizer (21.6 ms mean inference, 37.5 ms max). MediaPipe releases the
+  GIL during inference.
+- **The main thread's Python work:** replaying `two_hand_stretch` (no inference, dummy video)
+  raised the worst callback from 2.2 ms (one hand) to 7.2 ms, for work that takes ~0.2 ms. The
+  callback loses the GIL mid-block and waits up to a switch interval to get it back. Live adds
+  the camera background and the real `flip()`, which tips it into underruns.
+
+Same replay, Geometry, 30 s, silent:
+
+| Setup | Block | Callback mean / max ms | Largest gap ms |
+|---|---|---|---|
+| In-process, switch interval 5 ms (default) | 256 | 0.20 / 7.2 | 13.7 |
+| In-process, switch interval 5 ms | 512 | 0.75 / 7.2 | 17.6 |
+| In-process, switch interval 1 ms | 256 | 0.21 / 3.2 | 9.8 |
+| In-process, switch interval 0.5 ms | 256 | 0.19 / 1.4 | 8.5 |
+| **Separate process** (`--spike-process`), 5 ms | 256 | 0.19 / **0.55** | **5.7** |
+| **Separate process**, 5 ms | 512 | 0.24 / **0.61** | **10.9** |
+
+A shorter switch interval helps but only shrinks the window; the main thread's load grows in
+Phase C. In its own process the callback never waits for the GIL: the worst callback is 10 % of a
+256-sample block, and callbacks arrive once per block with no bursts.
+
+**Live, separate process** (`--spike-process`), Geometry, two hands moving, audible:
+
+| Block | Duration | Underruns | Callback mean / max ms | Largest gap ms | Output latency ms |
+|---|---|---|---|---|---|
+| 256 (5.3 ms) | 77 s | 0 | 0.067 / 0.27 | 5.6 | 10.7 |
+| 512 (10.7 ms) | 60 s | 0 | 0.105 / 0.40 | 11.0 | 10.7 |
+
+Decision (B.0, Ubuntu desktop): the engine runs in its own process. 512 is the default: the
+same reported latency as 256 here, with twice the headroom. MacBook run pending.
+
 ## Ubuntu laptop (x86_64): pending

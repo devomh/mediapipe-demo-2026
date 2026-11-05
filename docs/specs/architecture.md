@@ -121,7 +121,7 @@ ai-playground/                      (repo root)
 │   ├── render/         viewport.py  ui.py  overlay.py  hud.py  keys.py  booth.py  ink.py  reading.py  background.py  effects.py  text.py
 │   ├── physics/        world.py                                        (Phase A)
 │   ├── audio/          sfx.py (Phase A)  engine.py  voices.py  dsp.py  scales.py  (Phase B; scales.py portable)
-│   └── scenes/         base.py  hand_rules.py  vision.py  geometry.py  writing.py  ·  later: attract.py  train.py  synth.py  orchestra.py
+│   └── scenes/         base.py  hand_rules.py  vision.py  geometry.py  writing.py  ·  later: attract.py  train.py  theremin.py  piano.py  orchestra.py
 ├── tests/
 │   ├── fixtures/                   *.jsonl landmark recordings (small, committed)
 │   ├── synthetic.py                build hands programmatically (pinch of distance d, fist, open palm…)
@@ -197,7 +197,8 @@ fast on unknown keys.
 ## 9. Dependencies
 
 Runtime: `mediapipe` (brings `opencv-contrib-python`, `numpy`, `sounddevice`), `pygame-ce`,
-`pymunk` (`scikit-learn` only once Train-a-Gesture returns). Dev: `pytest`, `ruff`.
+`pymunk`, `scipy` from Phase B (the synth's filter, `lfilter`) (`scikit-learn` only once
+Train-a-Gesture returns). Dev: `pytest`, `ruff`.
 **Training only** (Colab, `training/charnet/requirements.txt`, never in `uv.lock`): `torch`, and
 what the training scripts need for data prep (PLAN D12).
 **Linux system package:** `libportaudio2` (the `sounddevice` wheels bundle PortAudio on macOS but

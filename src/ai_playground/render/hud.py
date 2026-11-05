@@ -77,7 +77,7 @@ class Hud:
             f"latency {_ms(s.latency.mean())} ms mean {_ms(s.latency.p95())} ms p95",
         ]
         if status:
-            lines.append(status)
+            lines.extend(status.splitlines())
         row = px(18)
         w = max(text.font(14).size(line)[0] for line in lines) + px(16)
         h = row * len(lines) + px(10) + (px(20) if recording_s is not None else 0)
