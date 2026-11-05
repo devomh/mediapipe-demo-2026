@@ -4,8 +4,14 @@
 **Invisible Piano** (discrete notes). A real-time audio engine gets built here and is reused by
 Phase C.
 
-Status: **direction spec.** Refine at the start of the phase with Phase 0/A measurements.
+Status: **direction spec, refined for the Theremin (2026-11-04).** §2, §4, §8 and §9 now follow
+the Phase 0/A measurements; the Piano (§5) is still direction only and gets refined at B.6.
 Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
+
+**Order of work:** the one real unknown is whether a Python audio callback keeps up while
+MediaPipe, pymunk and the 60 FPS render compete for the GIL. A throwaway spike (B.0) answers that
+on both machines before any DSP is built. The Theremin comes first and needs one voice; the voice
+pool and envelopes come with the Piano.
 
 ---
 
@@ -22,22 +28,41 @@ Builds on: [Phase 0](phase0-foundation.md), [architecture](architecture.md).
 ## 2. Audio engine (`audio/engine.py`, `audio/voices.py`, `audio/dsp.py`)
 
 **Stream:** `sounddevice.OutputStream(samplerate=48000, channels=2, dtype="float32",
-blocksize=256, latency="low")`. 256 samples is about 5.3 ms per block. Configurable.
+blocksize=512, latency="low")`. 512 samples is about 10.7 ms per block. Configurable; B.0
+measures 256, 512 and 1024 and sets the default.
+
+*Latency budget:* camera-to-screen latency is already 34 ms (MacBook) and 46 ms (Ubuntu) mean
+([measurements](../measurements.md)). Under the 100 ms exit criterion that leaves room for a
+1024-sample block (21 ms) plus the device buffer. The Theremin tolerates that; only the Piano's
+note onsets would notice, so prefer the larger block over underruns.
+
+**Stream lifetime:** the app opens the stream once at startup and keeps it open. Opening it on
+scene enter can click and takes 100 ms or more. Scenes that don't use audio leave it idle; the
+idle callback writes zeros and returns. If the device can't open (no device, CI), the engine is a
+no-op, like `Sfx`: sound never stops the exhibit.
+
+**GIL:** the callback is Python, so it must get the GIL every block. Python's default thread
+switch interval is 5 ms (`sys.getswitchinterval()`), about one whole 256-sample block, so the
+audio thread can wait that long behind the main thread. B.0 measures with and without
+`sys.setswitchinterval(0.001)`; if it helps, the app sets it at startup.
 
 **Callback contract:**
 - Vectorized NumPy only: no locks, no logging, no allocation-heavy work.
 - Must finish well within the block duration.
-- Underflow status flags are counted and shown in the HUD.
+- Underflow status flags are counted and shown in the HUD, with the callback's time (mean / max)
+  and the largest gap between callbacks.
 
-**Building blocks**
+**Building blocks** (the Theremin needs the first three rows plus delay and master; the rest come
+with the Piano)
 
 | Component | Implementation |
 |-----------|----------------|
-| Parameter smoothing | Per block, a linear ramp from the current value to the target (`np.linspace`), so there is no zipper noise |
+| Parameter smoothing | Targets arrive at the camera rate (30 Hz). Pitch is smoothed in **semitones** with a one-pole glide (time constant from config, ~60 ms), so a glide sounds even across the range and the 30 Hz steps don't show. Gain and other parameters: per block, a linear ramp from the current value to the target (`np.linspace`), so there is no zipper noise |
 | Oscillators | Phase accumulator via `np.cumsum` of per-sample increments, so glide is free. Shapes: sine, triangle, **polyBLEP** saw (anti-aliased), noise |
-| Envelope | ADSR, evaluated per block, vectorized per segment |
-| Voices | Fixed pool of 8 (16 in Phase C), voice stealing (oldest released first, then quietest) |
-| Filter | Biquad low-pass via `scipy.signal.lfilter` with persistent `zi` state. Coefficients are updated per block from the smoothed cutoff. SciPy is already installed via scikit-learn |
+| Mono voice | Theremin: one oscillator pair (sine + saw, blended), gain, no envelope; silence is gain 0 |
+| Envelope | *Piano:* ADSR, evaluated per block, vectorized per segment |
+| Voices | *Piano:* fixed pool of 8 (16 in Phase C), voice stealing (oldest released first, then quietest) |
+| Filter | Biquad low-pass via `scipy.signal.lfilter` with persistent `zi` state. Coefficients are updated per block from the smoothed cutoff. A recursive filter can't be vectorized in plain NumPy, so **`scipy` becomes an explicit dependency** in B.1 (it is not installed today). Until then the Theremin's brightness comes from the sine → saw blend |
 | Delay/echo | Ring buffer. Delay ≥ block size means a feedback delay can be computed per block, vectorized |
 | Reverb | *Stretch:* Schroeder combs (delays > block size, vectorized) + allpasses via `lfilter` |
 | Master | Gain → `tanh` soft clip → output; a copy of the last ~2048 samples goes to a ring buffer for visualization |
@@ -51,7 +76,7 @@ blocksize=256, latency="low")`. 256 samples is about 5.3 ms per block. Configura
 **Offline mode:** `engine.render(n_frames)` runs the same code without a stream. It is used by
 tests and to write WAV files for listening checks.
 
-**Fallback if underruns persist (measured in B.2):**
+**Fallback if underruns persist (measured in B.0, confirmed in B.2):**
 1. raise `blocksize` to 512;
 2. move the engine into a separate process (`multiprocessing`). Parameters go through a
    `shared_memory` float array, note events through a `Queue`. The `AudioEngine` interface stays
@@ -76,17 +101,42 @@ tests and to write WAV files for listening checks.
 
 **Hand roles go by screen side, not by MediaPipe handedness.** The hand on the right half of the
 screen is the **pitch hand**; the one on the left is the **expression hand**. This works the same
-for left-handed visitors and is immune to handedness label errors.
+for left-handed visitors and is immune to handedness label errors. With one hand in view, it is
+the pitch hand wherever it is.
+
+**v1 controls (B.3): three, all discoverable without instructions.** A visitor has about 30
+seconds and no manual; six mappings across two hands is too many to find.
 
 | Input | Parameter |
 |-------|-----------|
-| Pitch hand: index-tip height | Pitch over 2 octaves, **snapped to scale** (snap strength configurable: 1 = always on a note, 0 = classic theremin), glide 60 ms |
-| Pitch hand: horizontal position | Timbre blend, sine → saw |
-| Pitch hand: fist | Mute |
-| Expression hand: thumb–index opening | Volume (no expression hand → fixed 0.7) |
-| Expression hand: palm roll | Filter cutoff |
-| Both hands moving apart (distance) | Echo mix |
+| Pitch hand: index-tip height | Pitch over 2 octaves, **snapped to scale** (below), glide 60 ms |
+| Expression hand: palm height | Volume, the way a real theremin works (higher = louder). No expression hand → fixed 0.7 |
+| Pitch hand: horizontal position | Timbre blend, sine → saw. Harmless if nobody notices it |
 | No pitch hand | Release (fade out over 300 ms) |
+
+**Candidates after the B.3 user tests (B.5),** added only if visitors have mastered the three
+above. The features already exist in `gestures/features.py` (`pinch_ratio`, `palm_roll`).
+
+| Input | Parameter |
+|-------|-----------|
+| Expression hand: palm roll | Filter cutoff (needs the SciPy filter) |
+| Both hands moving apart (distance) | Echo mix |
+| Pitch hand: fist | Mute |
+| Expression hand: thumb–index opening | Volume, instead of palm height, if tests favour it |
+
+**Pitch mapping**
+- **Active band:** only the middle of the screen, 15–85 % of its height, maps to the 2 octaves
+  (clamped outside it). Tracking is worse near the edges, and arms get tired at the top.
+- **Snap the slow movement, keep the wobble:** low-pass the hand's pitch (in semitones), snap that
+  slow part to the scale, then add back the fast difference scaled by `vibrato_keep` (~0.5).
+  Visitors land on notes, and a shaking hand still gives natural vibrato; a hard snap of the raw
+  pitch sounds robotic. `snap_strength` (1 = always on a note, 0 = classic theremin) blends the
+  snapped and unsnapped slow part.
+- **Hysteresis:** the snapped note changes only once the slow pitch has moved past the midpoint to
+  the next scale note by a margin (~0.15 semitone), so a hand resting between two notes doesn't
+  flicker between them.
+- **Re-entry:** when the pitch hand returns after a release, the pitch **jumps** to the new
+  target while the gain is still 0, then fades in. Gliding from the last note sounds like a siren.
 
 **Visuals**
 - Horizontal note lanes labeled with note names.
@@ -110,8 +160,8 @@ for left-handed visitors and is immune to handedness label errors.
 
 A **"Your hand → sound"** panel shows each mapping live, as input value → output value:
 - `hand height 0.62 → A4 · 440 Hz`
-- `finger opening 0.35 → volume 0.40`
-- `palm tilt 18° → filter 2.1 kHz`
+- `other hand height 0.40 → volume 0.40`
+- `palm tilt 18° → filter 2.1 kHz` (once palm roll is mapped, B.5)
 
 Teaching point: a program is a set of functions turning measured numbers into new numbers. The
 oscilloscope shows that sound itself is a list of numbers ("48,000 numbers per second").
@@ -126,19 +176,27 @@ strip, and a **🎵 Music** button in the main navigation. Operator keys: `4` Sy
 
 | # | Milestone | Done when |
 |---|-----------|-----------|
-| B.1 | Engine, offline: oscillators, envelope, voices, filter, delay; WAV render; tests | Rendered WAVs sound clean (no clicks or aliasing at high notes) |
-| B.2 | Live stream, underrun counter, latency measurement in HUD; stress test with Geometry rendering | 0 underruns in 10 min, or fallback (§2) implemented |
-| B.3 | Scales + Theremin control mapping | New users play a recognizable melody within 1 min |
+| B.0 | **Spike** (throwaway, `--audio-spike`): live sine follows the pitch hand, in any scene; HUD shows underruns, callback time and gaps. 10 min in Geometry with many shapes, on the MacBook and the Ubuntu laptop, at 256 / 512 / 1024 samples, with and without a 1 ms switch interval | Block size and switch interval chosen from measurements; fallback (§2) needed or not. Results in `docs/measurements.md` |
+| B.1 | Engine, offline: mono voice (oscillators, semitone glide, gain ramps), delay, master; `scales.py`; WAV render; tests; `scipy` dependency + filter | Rendered WAVs sound clean (no clicks or aliasing at high notes) |
+| B.2 | Live stream owned by the app (replaces the spike), underrun counter and latency in HUD; 10-min stress test with Geometry rendering | 0 underruns in 10 min, or fallback (§2) implemented |
+| B.3 | Theremin scene with the v1 controls (§4); user tests | New users play a recognizable melody within 1 min |
 | B.4 | Theremin visuals: lanes, orb, oscilloscope, spectrum | 60 FPS maintained |
-| B.5 | Invisible Piano | Two-hand playing works; no stuck notes on hand loss |
-| B.6 | Discover panel, scale switching, polish | – |
-| B.7 | Ubuntu laptop check (PortAudio, PipeWire), measurements, tag `v0.B` | PLAN §3 Phase B exit criteria met |
+| B.5 | Theremin extra controls from the candidates (§4), only those the B.3 tests justify | – |
+| B.6 | Invisible Piano: envelope, voice pool; refine §5 first | Two-hand playing works; no stuck notes on hand loss |
+| B.7 | Discover panel, scale switching, polish | – |
+| B.8 | Ubuntu laptop check (PortAudio, PipeWire), measurements, tag `v0.B` | PLAN §3 Phase B exit criteria met |
 
 ## 9. Tests
 
 - **DSP, offline:** sine frequency via FFT peak; envelope shape; voice stealing; no NaN or Inf;
   output within [−1, 1] after the soft clip.
 - **Parameter-ramp continuity:** no discontinuity larger than ε between blocks.
-- **Scales:** quantize and snap tables.
+- **Scales:** quantize and snap tables; snap hysteresis (a pitch resting at a note midpoint stays
+  on one note); slow-snap keeps the fast wobble scaled by `vibrato_keep`.
+- **Theremin re-entry:** pitch hand lost, then found an octave away → no glide (the pitch jumps
+  while the gain is 0).
+- **Fixture WAVs:** record `theremin_sweep` (slow up and down) and `theremin_hand_loss`; a test
+  replays each through tracker → mapping → offline `render()` and checks for clicks (no sample
+  step above ε), NaN and stuck sound. The WAVs are also the listening check.
 - **Hand loss:** a `pinch_end` with `reason: lost` releases its note, so no stuck notes.
 - **Fixture-driven:** replay `right_pinch_x5` in Piano mode → 5 note-on/off pairs.

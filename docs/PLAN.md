@@ -119,8 +119,17 @@ are parked. Their spec sections stay in place for later.
 ### Phase B — AirSynth · [spec](specs/phaseB-airsynth.md)
 
 A real-time audio engine plus two instruments: a **Theremin** (continuous pitch quantized to a
-pentatonic scale, other hand for volume and filter) and an **Invisible Piano** (note columns, pinch
+pentatonic scale, other hand for volume) and an **Invisible Piano** (note columns, pinch
 to play). Waveform/spectrum view as the "discover" layer.
+
+**Where we are (2026-11-04)**
+
+- Informal tests of Geometry and Air Writing are satisfactory; A.8 (staff key, soak test, Ubuntu
+  laptop, `v0.A`) is still open.
+- Spec refined for the Theremin: spike first (B.0), one voice before the Piano's voice pool, three
+  v1 controls, slow-snap pitch mapping, `scipy` for the filter
+  ([Phase B §8](specs/phaseB-airsynth.md#8-milestones)).
+- **Next:** B.0 measurements on the MacBook and the Ubuntu laptop (`--audio-spike`).
 
 **Exit criteria**
 
@@ -155,7 +164,7 @@ operations checklist.
 |------|-----------|------------|
 | Venue lighting or backlight hurts tracking | High | Test in the venue early; ring light in the kit; `min_detection_confidence` in config |
 | Bystanders' hands get tracked | High | Ignore hands smaller than `min_hand_size` (far from camera); mark the floor spot |
-| Python audio callback underruns under rendering load | Medium | Larger block size; fall back to running audio in a separate process ([Phase B §2](specs/phaseB-airsynth.md#2-audio-engine-audioenginepy-audiovoicespy-audiodsppy)) |
+| Python audio callback underruns under rendering load | Medium | Measured first (B.0 spike); larger block size, shorter GIL switch interval; fall back to running audio in a separate process ([Phase B §2](specs/phaseB-airsynth.md#2-audio-engine-audioenginepy-audiovoicespy-audiodsppy)) |
 | macOS camera permission or wrong camera index on event day | Medium | Startup check with clear on-screen error; `--list-cameras`; ops checklist |
 | Gestures feel unreliable for new users | Medium | Small gesture vocabulary, hysteresis, onboarding hints, test with new users at every phase |
 | Air-written characters look unlike EMNIST's pen scans (wobbly, even stroke width, slanted), so accuracy drops | High | One framing function shared by training and the app; augmentation that imitates air-writing; measure on our own air-written set before building the UI polish; fine-tune on it if needed ([Air Writing §5](specs/phaseA-air-writing.md#5-model)) |

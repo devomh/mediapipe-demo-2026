@@ -197,7 +197,8 @@ fast on unknown keys.
 ## 9. Dependencies
 
 Runtime: `mediapipe` (brings `opencv-contrib-python`, `numpy`, `sounddevice`), `pygame-ce`,
-`pymunk` (`scikit-learn` only once Train-a-Gesture returns). Dev: `pytest`, `ruff`.
+`pymunk`, `scipy` from Phase B (the synth's filter, `lfilter`) (`scikit-learn` only once
+Train-a-Gesture returns). Dev: `pytest`, `ruff`.
 **Training only** (Colab, `training/charnet/requirements.txt`, never in `uv.lock`): `torch`, and
 what the training scripts need for data prep (PLAN D12).
 **Linux system package:** `libportaudio2` (the `sounddevice` wheels bundle PortAudio on macOS but
